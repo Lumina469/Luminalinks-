@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "LuminaLinks",
-    "slug": "LuminaLinks",
+    "slug": "luminalinks-local-dev-xyz123",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -19,7 +19,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.luminalinks.app"
     },
     "web": {
       "output": "static",
@@ -47,9 +48,12 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "7c1c8439-5604-4f09-b437-a96d6a36d695"
+        "projectId": "62c0fa52-f24d-436e-b864-7fe6fcb8a263"
       }
     },
-    "owner": "lumia614"
+    "updates": {
+      "enabled": false,
+      "checkAutomatically": "NEVER"
+    }
   }
 }
