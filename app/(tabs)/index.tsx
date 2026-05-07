@@ -1,6 +1,16 @@
+import React, { useState, useRef, useEffect } from "react";
+import { WebView } from "react-native-webview";
 import { supabase } from '../../lib/supabase';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, SafeAreaView, TextInput, Alert, Switch, Image, Linking } from "react-native";
 import * as Location from "expo-location";
+import { calculateETA } from "./etaUtils";
+import { calculateDriverPayout } from "./earningsLogic";
+import { addRideToHistory, calculateAverageRating } from "./historyLogic";
+import { MOCK_RIDES } from "./mockData";
+import { formatRideNotification } from "./notificationLogic";
+import { updateCommissionRate } from "./adminLogic";
+import { triggerSOS } from "./securityLogic";
+import { MOCK_RIDES } from "./mockData";
 import * as ImagePicker from "expo-image-picker";
 
 const searchPlaces = async (q) => {
