@@ -9,8 +9,7 @@ import { addRideToHistory, calculateAverageRating } from "./historyLogic";
 import { MOCK_RIDES } from "./mockData";
 import { formatRideNotification } from "./notificationLogic";
 import { updateCommissionRate } from "./adminLogic";
-import { triggerSOS } from "./securityLogic";
-import { MOCK_RIDES } from "./mockData";
+import { securityProtocol } from "./securityLogic";
 import * as ImagePicker from "expo-image-picker";
 
 const searchPlaces = async (q) => {
@@ -23,10 +22,10 @@ const searchPlaces = async (q) => {
 const calcFare = (km) => {
   const pendingCount = (driverBookings||[]).filter(b=>b.status==="pending").length;
   const surgeMultiplier = pendingCount >= 10 ? 1.5 : pendingCount >= 5 ? 1.25 : pendingCount >= 3 ? 1.1 : 1.0;
-  const base = 3.0;
-  const perKm = 1.80;
-  const fare = Math.max(8, base + km * perKm) * surgeMultiplier;
-  const commission = fare * 0.10;
+  const base = 5.0;
+  const perKm = 8.0;
+  const fare = Math.max(20, base + km * perKm) * surgeMultiplier;
+  const commission = fare * 0.15;
   const driverEarns = fare - commission;
   return fare.toFixed(2);
 };

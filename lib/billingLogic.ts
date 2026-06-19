@@ -13,7 +13,7 @@ export function calculatePayout(
   const totalCharged = baseFee + (durationHours * hourlyRate);
   
   // 10% Lumina Commission
-  const commission = totalCharged * 0.10;
+  const commission = totalCharged * 0.15;
   const proEarnings = totalCharged - commission;
 
   return {
