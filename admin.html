@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LuminaLinks Admin Console</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1f2937;
+    --border: #30363d;
+    --gold: #c9a84c;
+    --gold-dim: #c9a84c33;
+    --green: #00ff88;
+    --green-dim: #00ff8822;
+    --red: #ff4444;
+    --red-dim: #ff444422;
+    --blue: #2196f3;
+    --blue-dim: #2196f322;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-muted: #484f58;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  body {
+    font-family: var(--font-ui);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ── LOGIN ── */
+  #login-screen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .login-box {
+    width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+  }
+  .login-logo { color: var(--gold); font-size: 28px; font-weight: 800; margin-bottom: 4px; }
+  .login-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 32px; }
+  .login-label { color: var(--text-dim); font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px; }
+  .login-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 12px 14px; font-size: 14px;
+    margin-bottom: 16px; outline: none; font-family: var(--font-ui);
+    transition: border-color 0.2s;
+  }
+  .login-input:focus { border-color: var(--gold); }
+  .login-btn {
+    width: 100%; background: var(--gold); color: #000; border: none;
+    border-radius: 8px; padding: 13px; font-size: 15px; font-weight: 700;
+    cursor: pointer; transition: opacity 0.2s;
+  }
+  .login-btn:hover { opacity: 0.9; }
+  .login-error { color: var(--red); font-size: 13px; margin-top: 10px; text-align: center; min-height: 18px; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 220px; min-width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    height: 100vh; position: sticky; top: 0;
+  }
+  .sidebar-logo {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo-text { color: var(--gold); font-size: 18px; font-weight: 800; }
+  .sidebar-logo-sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+
+  .sidebar-nav { padding: 12px 8px; flex: 1; overflow-y: auto; }
+  .nav-section { color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 12px 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 6px; cursor: pointer;
+    color: var(--text-dim); font-size: 13px; font-weight: 500;
+    transition: all 0.15s; margin-bottom: 1px; border: none; background: none; width: 100%; text-align: left;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--gold-dim); color: var(--gold); }
+  .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+  .nav-badge {
+    margin-left: auto; background: var(--red); color: #fff;
+    font-size: 10px; font-weight: 700; border-radius: 10px;
+    padding: 1px 6px; min-width: 18px; text-align: center;
+  }
+
+  .sidebar-footer {
+    padding: 16px; border-top: 1px solid var(--border);
+  }
+  .founder-badge {
+    background: var(--gold-dim); border: 1px solid var(--gold);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .founder-name { color: var(--gold); font-size: 13px; font-weight: 700; }
+  .founder-role { color: var(--text-muted); font-size: 11px; }
+
+  /* ── MAIN ── */
+  #main {
+    flex: 1; overflow-y: auto; height: 100vh;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .topbar-title { font-size: 16px; font-weight: 700; color: var(--text); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .live-ticker {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px;
+  }
+  .ticker-item { display: flex; align-items: center; gap: 6px; }
+  .ticker-dot { width: 6px; height: 6px; border-radius: 50%; animation: pulse 2s infinite; }
+  .ticker-dot.green { background: var(--green); }
+  .ticker-dot.gold { background: var(--gold); }
+  .ticker-dot.blue { background: var(--blue); }
+  .ticker-val { font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
+  .ticker-label { color: var(--text-muted); font-size: 11px; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ── PAGE CONTENT ── */
+  .page { display: none; padding: 24px; }
+  .page.active { display: block; }
+
+  /* ── STAT CARDS ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .stat-label { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 8px; }
+  .stat-val { font-family: var(--font-mono); font-size: 26px; font-weight: 700; color: var(--text); }
+  .stat-sub { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
+  .stat-card.gold { border-color: var(--gold); }
+  .stat-card.gold .stat-val { color: var(--gold); }
+  .stat-card.green { border-color: var(--green); }
+  .stat-card.green .stat-val { color: var(--green); }
+  .stat-card.red { border-color: var(--red); }
+  .stat-card.red .stat-val { color: var(--red); }
+  .stat-card.blue { border-color: var(--blue); }
+  .stat-card.blue .stat-val { color: var(--blue); }
+
+  /* ── TABLES ── */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .section-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .section-sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; margin-bottom: 24px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: var(--bg); color: var(--text-muted);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 10px 16px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 12px 16px; font-size: 13px; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* ── BADGES ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; border-radius: 20px;
+    padding: 3px 10px; border: 1px solid;
+  }
+  .badge.green { color: var(--green); border-color: var(--green); background: var(--green-dim); }
+  .badge.gold { color: var(--gold); border-color: var(--gold); background: var(--gold-dim); }
+  .badge.red { color: var(--red); border-color: var(--red); background: var(--red-dim); }
+  .badge.blue { color: var(--blue); border-color: var(--blue); background: var(--blue-dim); }
+  .badge.grey { color: var(--text-dim); border-color: var(--border); background: var(--surface2); }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: opacity 0.15s; font-family: var(--font-ui);
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-gold { background: var(--gold); color: #000; }
+  .btn-green { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .btn-red { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ── FORMS ── */
+  .form-group { margin-bottom: 16px; }
+  .form-label { color: var(--text-dim); font-size: 12px; font-weight: 600; margin-bottom: 6px; display: block; }
+  .form-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+    outline: none; font-family: var(--font-ui); transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: var(--gold); }
+  .form-select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+    outline: none; font-family: var(--font-ui);
+  }
+  textarea.form-input { resize: vertical; min-height: 80px; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-bottom: 16px;
+  }
+  .card-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .card-sub { color: var(--text-dim); font-size: 12px; margin-bottom: 16px; }
+
+  /* ── GRID LAYOUTS ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* ── ALERTS ── */
+  .alert {
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;
+    font-size: 13px; display: flex; align-items: flex-start; gap: 10px;
+  }
+  .alert.sos { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+  .alert.warn { background: #ff980022; border: 1px solid #ff9800; color: #ff9800; }
+  .alert.info { background: var(--blue-dim); border: 1px solid var(--blue); color: var(--blue); }
+
+  /* ── TOGGLE ── */
+  .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+  .toggle {
+    position: relative; width: 40px; height: 22px;
+    background: var(--surface2); border-radius: 11px;
+    cursor: pointer; transition: background 0.2s; border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--gold); border-color: var(--gold); }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(18px); }
+  .toggle-label { font-size: 13px; color: var(--text-dim); }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: #0009; z-index: 500;
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; width: 440px; max-width: 95vw;
+  }
+  .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .modal-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── MAP PLACEHOLDER ── */
+  .map-box {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 10px; height: 320px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative; overflow: hidden; margin-bottom: 24px;
+  }
+  .map-grid {
+    position: absolute; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.4;
+  }
+  .map-dot {
+    position: absolute; border-radius: 50%;
+    animation: float 4s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-6px); }
+  }
+  .map-label {
+    position: relative; z-index: 1;
+    color: var(--text-dim); font-size: 13px; text-align: center;
+  }
+
+  /* ── REVENUE CHART ── */
+  .chart-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-bottom: 24px;
+  }
+
+  /* ── SEARCH ── */
+  .search-bar {
+    display: flex; gap: 10px; margin-bottom: 16px;
+  }
+  .search-input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 9px 12px; font-size: 13px;
+    outline: none; font-family: var(--font-ui);
+  }
+  .search-input:focus { border-color: var(--gold); }
+
+  /* ── SETTINGS ── */
+  .setting-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0; border-bottom: 1px solid var(--border);
+  }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-info { flex: 1; }
+  .setting-name { font-size: 13px; font-weight: 600; }
+  .setting-desc { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .setting-control { display: flex; align-items: center; gap: 8px; }
+
+  /* ── OTP MODAL ── */
+  .otp-digits { display: flex; gap: 10px; justify-content: center; margin: 20px 0; }
+  .otp-digit {
+    width: 48px; height: 56px; background: var(--bg); border: 2px solid var(--border);
+    border-radius: 8px; font-size: 24px; font-weight: 700; text-align: center;
+    color: var(--gold); font-family: var(--font-mono); outline: none;
+  }
+  .otp-digit:focus { border-color: var(--gold); }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    #sidebar { width: 60px; min-width: 60px; }
+    .sidebar-logo-text, .sidebar-logo-sub, .nav-item span:not(.nav-icon), .nav-badge, .founder-badge { display: none; }
+    .nav-item { justify-content: center; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .live-ticker { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">LuminaLinks</div>
+    <div class="login-sub">Admin Console — Founder Access Only</div>
+    <div class="form-group">
+      <div class="login-label">Email</div>
+      <input class="login-input" id="login-email" type="email" placeholder="lumima641@gmail.com">
+    </div>
+    <div class="form-group">
+      <div class="login-label">Password</div>
+      <input class="login-input" id="login-pass" type="password" placeholder="••••••••">
+    </div>
+    <button class="login-btn" onclick="doLogin()">Access Console</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- OTP MODAL -->
+<div class="modal-overlay" id="otp-modal">
+  <div class="modal">
+    <div class="modal-title">🔐 OTP Verification Required</div>
+    <div class="modal-sub" id="otp-desc">Enter the 6-digit code sent to your registered phone number.</div>
+    <div class="otp-digits">
+      <input class="otp-digit" maxlength="1" id="otp0" oninput="otpNext(0)">
+      <input class="otp-digit" maxlength="1" id="otp1" oninput="otpNext(1)">
+      <input class="otp-digit" maxlength="1" id="otp2" oninput="otpNext(2)">
+      <input class="otp-digit" maxlength="1" id="otp3" oninput="otpNext(3)">
+      <input class="otp-digit" maxlength="1" id="otp4" oninput="otpNext(4)">
+      <input class="otp-digit" maxlength="1" id="otp5" oninput="otpNext(5)">
+    </div>
+    <div class="login-error" id="otp-error"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeOtp()">Cancel</button>
+      <button class="btn btn-gold" onclick="verifyOtp()">Verify & Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- USER ACTION MODAL -->
+<div class="modal-overlay" id="user-modal">
+  <div class="modal">
+    <div class="modal-title" id="user-modal-title">Driver Action</div>
+    <div class="modal-sub" id="user-modal-sub">Choose what action to take on this user.</div>
+    <div id="user-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('user-modal').classList.remove('open')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICATION MODAL -->
+<div class="modal-overlay" id="notif-modal">
+  <div class="modal">
+    <div class="modal-title">📣 Send Notification</div>
+    <div class="modal-sub">Send a push notification to users on the platform.</div>
+    <div class="form-group">
+      <label class="form-label">Send To</label>
+      <select class="form-select" id="notif-target">
+        <option value="all">All Users</option>
+        <option value="clients">All Clients Only</option>
+        <option value="drivers">All Drivers Only</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Title</label>
+      <input class="form-input" id="notif-title" placeholder="Notification title...">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Message</label>
+      <textarea class="form-input" id="notif-body" placeholder="Your message here..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('notif-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-gold" onclick="sendNotification()">Send Notification</button>
+    </div>
+  </div>
+</div>
+
+<!-- WITHDRAW MODAL -->
+<div class="modal-overlay" id="withdraw-modal">
+  <div class="modal">
+    <div class="modal-title">💰 Withdraw Commission</div>
+    <div class="modal-sub">Withdraw your platform earnings. OTP required.</div>
+    <div class="form-group">
+      <label class="form-label">Amount (GHS)</label>
+      <input class="form-input" id="withdraw-amount" type="number" placeholder="0.00">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Withdrawal Method</label>
+      <select class="form-select" id="withdraw-method">
+        <option>MTN Mobile Money</option>
+        <option>Vodafone Cash</option>
+        <option>AirtelTigo Money</option>
+        <option>Bank Account</option>
+        <option>Visa/Mastercard</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('withdraw-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-gold" onclick="initiateWithdraw()">Request OTP & Withdraw</button>
+    </div>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<nav id="sidebar" style="display:none;">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-text">LuminaLinks</div>
+    <div class="sidebar-logo-sub">Admin Console v1.0</div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <button class="nav-item active" onclick="showPage('dashboard')">
+      <span class="nav-icon">📊</span><span>Dashboard</span>
+    </button>
+    <button class="nav-item" onclick="showPage('operations')">
+      <span class="nav-icon">🗺️</span><span>Live Operations</span>
+    </button>
+    <div class="nav-section">Management</div>
+    <button class="nav-item" onclick="showPage('bookings')">
+      <span class="nav-icon">🚗</span><span>Bookings</span>
+    </button>
+    <button class="nav-item" onclick="showPage('drivers')">
+      <span class="nav-icon">👤</span><span>Drivers</span>
+    </button>
+    <button class="nav-item" onclick="showPage('clients')">
+      <span class="nav-icon">👥</span><span>Clients</span>
+    </button>
+    <button class="nav-item" onclick="showPage('refunds')">
+      <span class="nav-icon">↩️</span><span>Refunds</span>
+      <span class="nav-badge" id="refund-badge">0</span>
+    </button>
+    <div class="nav-section">Finance</div>
+    <button class="nav-item" onclick="showPage('earnings')">
+      <span class="nav-icon">💰</span><span>Earnings</span>
+    </button>
+    <div class="nav-section">Platform</div>
+    <button class="nav-item" onclick="showPage('notifications')">
+      <span class="nav-icon">📣</span><span>Notifications</span>
+    </button>
+    <button class="nav-item" onclick="showPage('settings')">
+      <span class="nav-icon">⚙️</span><span>Settings</span>
+    </button>
+  </div>
+  <div class="sidebar-footer">
+    <div class="founder-badge">
+      <div class="founder-name">Lumina</div>
+      <div class="founder-role">Founder · Full Access</div>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div id="main" style="display:none;">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-title" id="page-title">Dashboard</div>
+    <div class="topbar-right">
+      <div class="live-ticker" id="live-ticker">
+        <div class="ticker-item">
+          <div class="ticker-dot green"></div>
+          <span class="ticker-val" id="tick-active">0</span>
+          <span class="ticker-label">Active Rides</span>
+        </div>
+        <div class="ticker-item">
+          <div class="ticker-dot gold"></div>
+          <span class="ticker-val" id="tick-drivers">0</span>
+          <span class="ticker-label">Drivers Online</span>
+        </div>
+        <div class="ticker-item">
+          <div class="ticker-dot blue"></div>
+          <span class="ticker-val" id="tick-revenue">GHS 0</span>
+          <span class="ticker-label">Today</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Refresh</button>
+      <button class="btn btn-red btn-sm" onclick="logout()">Log Out</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div class="page active" id="page-dashboard">
+    <div id="sos-alerts"></div>
+    <div class="stats-grid">
+      <div class="stat-card gold">
+        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-val" id="stat-today">GHS 0</div>
+        <div class="stat-sub">15% commission earned</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Total Bookings</div>
+        <div class="stat-val" id="stat-bookings">0</div>
+        <div class="stat-sub">All time</div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-label">Active Drivers</div>
+        <div class="stat-val" id="stat-drivers">0</div>
+        <div class="stat-sub">Verified on platform</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending Rides</div>
+        <div class="stat-val" id="stat-pending">0</div>
+        <div class="stat-sub">Waiting for driver</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="section-header">
+          <div>
+            <div class="section-title">Revenue This Week</div>
+            <div class="section-sub">Daily commission earned (GHS)</div>
+          </div>
+        </div>
+        <div class="chart-box">
+          <canvas id="revenue-chart" height="160"></canvas>
+        </div>
+      </div>
+      <div>
+        <div class="section-header">
+          <div>
+            <div class="section-title">Recent Bookings</div>
+            <div class="section-sub">Last 5 rides on the platform</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Route</th><th>Fare</th><th>Status</th></tr></thead>
+            <tbody id="recent-bookings">
+              <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <div>
+        <div class="section-title">Platform Breakdown</div>
+        <div class="section-sub">Revenue by service type</div>
+      </div>
+    </div>
+    <div class="grid-3">
+      <div class="stat-card">
+        <div class="stat-label">Car Rides</div>
+        <div class="stat-val" id="stat-car">0</div>
+        <div class="stat-sub">total bookings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tuk Tuk</div>
+        <div class="stat-val" id="stat-tuktuk">0</div>
+        <div class="stat-sub">total bookings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Motorbike</div>
+        <div class="stat-val" id="stat-moto">0</div>
+        <div class="stat-sub">total bookings</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE OPERATIONS PAGE -->
+  <div class="page" id="page-operations">
+    <div class="map-box">
+      <div class="map-grid"></div>
+      <div id="map-dots"></div>
+      <div class="map-label">
+        <div style="font-size:32px;margin-bottom:8px;">🗺️</div>
+        <div style="color:var(--text);font-weight:700;margin-bottom:4px;">Live Operations Map</div>
+        <div>Active rides shown below — map integration available with full GPS data</div>
+      </div>
+    </div>
+    <div class="section-header">
+      <div class="section-title">Active Rides Right Now</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Booking ID</th><th>Client</th><th>Pickup</th><th>Dropoff</th><th>Driver</th><th>Fare</th><th>Status</th></tr></thead>
+        <tbody id="active-rides-table">
+          <tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">Loading active rides...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BOOKINGS PAGE -->
+  <div class="page" id="page-bookings">
+    <div class="search-bar">
+      <input class="search-input" id="booking-search" placeholder="Search by client name, pickup, or status..." oninput="filterBookings()">
+      <select class="form-select" style="width:160px;" id="booking-filter" onchange="filterBookings()">
+        <option value="">All Status</option>
+        <option value="pending">Pending</option>
+        <option value="accepted">Accepted</option>
+        <option value="completed">Completed</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Client</th><th>Pickup</th><th>Dropoff</th><th>Service</th><th>Fare</th><th>Payment</th><th>Status</th><th>Time</th></tr></thead>
+        <tbody id="bookings-table">
+          <tr><td colspan="9" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- DRIVERS PAGE -->
+  <div class="page" id="page-drivers">
+    <div class="search-bar">
+      <input class="search-input" id="driver-search" placeholder="Search drivers by name, email, or phone..." oninput="filterDrivers()">
+      <button class="btn btn-gold" onclick="document.getElementById('notif-modal').classList.add('open');document.getElementById('notif-target').value='drivers'">📣 Notify All Drivers</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Verified</th><th>Suspended</th><th>Actions</th></tr></thead>
+        <tbody id="drivers-table">
+          <tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CLIENTS PAGE -->
+  <div class="page" id="page-clients">
+    <div class="search-bar">
+      <input class="search-input" id="client-search" placeholder="Search clients by name or email..." oninput="filterClients()">
+      <button class="btn btn-gold" onclick="document.getElementById('notif-modal').classList.add('open');document.getElementById('notif-target').value='clients'">📣 Notify All Clients</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Actions</th></tr></thead>
+        <tbody id="clients-table">
+          <tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- REFUNDS PAGE -->
+  <div class="page" id="page-refunds">
+    <div class="alert info">
+      <span>ℹ️</span>
+      <span>Review evidence from both sides before approving. Approvals are immediate and irreversible.</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Booking</th><th>Client</th><th>Amount</th><th>Reason</th><th>Date</th><th>Actions</th></tr></thead>
+        <tbody id="refunds-table">
+          <tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:24px;">No pending refund requests.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EARNINGS PAGE -->
+  <div class="page" id="page-earnings">
+    <div class="stats-grid">
+      <div class="stat-card gold">
+        <div class="stat-label">Available to Withdraw</div>
+        <div class="stat-val" id="earn-available">GHS 0</div>
+        <div class="stat-sub">15% platform commission</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Earned</div>
+        <div class="stat-val" id="earn-total">GHS 0</div>
+        <div class="stat-sub">All time gross commission</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Withdrawn</div>
+        <div class="stat-val" id="earn-withdrawn">GHS 0</div>
+        <div class="stat-sub">All time withdrawals</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">This Month</div>
+        <div class="stat-val" id="earn-month">GHS 0</div>
+        <div class="stat-sub">Current month earnings</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Withdraw Earnings</div>
+      <div class="card-sub">OTP verification required for all withdrawals. GHS 5,000+ requires double OTP.</div>
+      <button class="btn btn-gold" onclick="document.getElementById('withdraw-modal').classList.add('open')">💰 Initiate Withdrawal</button>
+    </div>
+    <div class="section-header" style="margin-top:8px;">
+      <div class="section-title">Withdrawal History</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
+        <tbody id="withdrawal-history">
+          <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No withdrawals yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- NOTIFICATIONS PAGE -->
+  <div class="page" id="page-notifications">
+    <div class="card">
+      <div class="card-title">Send Push Notification</div>
+      <div class="card-sub">No OTP required. Reaches all users instantly via Expo push service.</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Send To</label>
+          <select class="form-select" id="notif2-target">
+            <option value="all">All Users</option>
+            <option value="clients">All Clients</option>
+            <option value="drivers">All Drivers</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Title</label>
+          <input class="form-input" id="notif2-title" placeholder="Notification title...">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message</label>
+        <textarea class="form-input" id="notif2-body" placeholder="Your message..."></textarea>
+      </div>
+      <button class="btn btn-gold" onclick="sendNotification2()">📣 Send Now</button>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">🎂 Birthday Mode</div>
+      <div class="card-sub">One tap — notifies all users that it's your birthday. Tipping button appears for 24 hours only.</div>
+      <div class="toggle-wrap">
+        <div class="toggle" id="birthday-toggle" onclick="toggleBirthday()"></div>
+        <span class="toggle-label">Birthday mode is OFF</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">🔧 Maintenance Mode</div>
+      <div class="card-sub">Shows a friendly "updating" screen to all users. Max 30 minutes — use only for major updates.</div>
+      <div class="toggle-wrap">
+        <div class="toggle" id="maintenance-toggle" onclick="toggleMaintenance()"></div>
+        <span class="toggle-label">Maintenance mode is OFF</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS PAGE -->
+  <div class="page" id="page-settings">
+    <div class="card">
+      <div class="card-title">Platform Settings</div>
+      <div class="card-sub">OTP required to change commission rate. All other changes are instant.</div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Commission Rate</div>
+          <div class="setting-desc">Platform percentage taken from every fare. Blueprint: 15%</div>
+        </div>
+        <div class="setting-control">
+          <input class="form-input" style="width:80px;" id="commission-rate" value="15" type="number" min="1" max="30">
+          <span style="color:var(--text-dim);font-size:13px;">%</span>
+          <button class="btn btn-gold btn-sm" onclick="changeCommission()">Save</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Founder Free Ride Code</div>
+          <div class="setting-desc">100% free rides — platform covers fare</div>
+        </div>
+        <div class="setting-control">
+          <input class="form-input" style="width:200px;" id="founder-code" value="F0UN-D3R-LNK-X9Q2">
+          <button class="btn btn-gold btn-sm" onclick="saveCode('founder')">Save</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Staff Discount Code</div>
+          <div class="setting-desc">Adjustable discount for LuminaLinks staff</div>
+        </div>
+        <div class="setting-control">
+          <input class="form-input" style="width:200px;" id="staff-code" value="LUMINA-STAFF-2026">
+          <input class="form-input" style="width:70px;" id="staff-discount" value="50" type="number" min="10" max="100">
+          <span style="color:var(--text-dim);font-size:13px;">%</span>
+          <button class="btn btn-gold btn-sm" onclick="saveCode('staff')">Save</button>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Surge Multipliers</div>
+          <div class="setting-desc">Automatic surge levels based on pending ride count</div>
+        </div>
+        <div class="setting-control">
+          <span class="badge green">3+ rides: 1.1x</span>
+          <span class="badge gold">5+ rides: 1.25x</span>
+          <span class="badge red">10+ rides: 1.5x</span>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-name">Night Pricing</div>
+          <div class="setting-desc">Automatic multipliers by time of day</div>
+        </div>
+        <div class="setting-control" style="flex-wrap:wrap;gap:6px;">
+          <span class="badge grey">6AM–8PM: 1.0x</span>
+          <span class="badge grey">8PM–10PM: 1.2x</span>
+          <span class="badge gold">10PM–12AM: 1.5x</span>
+          <span class="badge red">12AM–4AM: 2.0x</span>
+          <span class="badge gold">4AM–6AM: 1.5x</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Fare Floor Settings</div>
+      <div class="card-sub">Minimum fare per service type — blueprint defaults shown</div>
+      <div class="grid-3">
+        <div class="form-group">
+          <label class="form-label">Car Minimum (GHS)</label>
+          <input class="form-input" value="20" type="number">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tuk Tuk Minimum (GHS)</label>
+          <input class="form-input" value="10" type="number">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Motorbike Minimum (GHS)</label>
+          <input class="form-input" value="15" type="number">
+        </div>
+      </div>
+      <button class="btn btn-gold">Save Fare Floors</button>
+    </div>
+  </div>
+
+</div><!-- end main -->
+
+<script>
+// ── SUPABASE CONFIG ──
+const SUPABASE_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhd2R0enFnd2hxY2hqdXVyc2pqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY2NjUyOTIsImV4cCI6MjA2MjI0MTI5Mn0.Jb6rlGJCJTWYuIAVqX_E7oRz_FVlBqx_2Ff-AQBpYVM';
+
+const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  headers: {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${window._sbToken || SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation',
+    ...opts.headers
+  },
+  ...opts
+}).then(r => r.json());
+
+// ── STATE ──
+let allBookings = [], allDrivers = [], allClients = [];
+let otpAction = null, otpToken = null;
+let revenueChart = null;
+let birthdayOn = false, maintenanceOn = false;
+
+// ── LOGIN ──
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+
+  if (!email || !pass) { err.textContent = 'Please enter email and password.'; return; }
+
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: pass })
+  }).then(r => r.json());
+
+  if (res.error) { err.textContent = res.error_description || 'Login failed.'; return; }
+
+  window._sbToken = res.access_token;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('sidebar').style.display = 'flex';
+  document.getElementById('main').style.display = 'block';
+  loadAll();
+  startTicker();
+}
+
+function logout() {
+  window._sbToken = null;
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('sidebar').style.display = 'none';
+  document.getElementById('main').style.display = 'none';
+}
+
+// ── NAVIGATION ──
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick')?.includes(`'${name}'`)) n.classList.add('active');
+  });
+  const titles = { dashboard: 'Dashboard', operations: 'Live Operations', bookings: 'All Bookings', drivers: 'Driver Management', clients: 'Client Management', refunds: 'Refund Management', earnings: 'My Earnings', notifications: 'Notifications', settings: 'Platform Settings' };
+  document.getElementById('page-title').textContent = titles[name] || name;
+  if (name === 'operations') renderLiveOps();
+  if (name === 'earnings') calcEarnings();
+}
+
+// ── LOAD DATA ──
+async function loadAll() {
+  await Promise.all([loadBookings(), loadDrivers(), loadClients()]);
+  renderDashboard();
+  buildChart();
+}
+
+async function loadBookings() {
+  const data = await sb('bookings?select=*&order=created_at.desc&limit=200');
+  allBookings = Array.isArray(data) ? data : [];
+  renderBookingsTable();
+}
+
+async function loadDrivers() {
+  const data = await sb("profiles?select=*&eq.role=driver");
+  allDrivers = Array.isArray(data) ? data.filter(p => p.role === 'driver') : [];
+  renderDriversTable();
+}
+
+async function loadClients() {
+  const data = await sb("profiles?select=*&eq.role=client");
+  allClients = Array.isArray(data) ? data.filter(p => p.role === 'client') : [];
+  renderClientsTable();
+}
+
+function refreshAll() { loadAll(); }
+
+// ── DASHBOARD ──
+function renderDashboard() {
+  const today = new Date().toDateString();
+  const todayBookings = allBookings.filter(b => new Date(b.created_at).toDateString() === today);
+  const todayRevenue = todayBookings.filter(b => b.status === 'completed').reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+
+  document.getElementById('stat-today').textContent = `GHS ${todayRevenue.toFixed(2)}`;
+  document.getElementById('stat-bookings').textContent = allBookings.length;
+  document.getElementById('stat-drivers').textContent = allDrivers.filter(d => d.is_verified).length;
+  document.getElementById('stat-pending').textContent = allBookings.filter(b => b.status === 'pending').length;
+
+  document.getElementById('stat-car').textContent = allBookings.filter(b => b.service === 'car').length;
+  document.getElementById('stat-tuktuk').textContent = allBookings.filter(b => b.service === 'tuktuk').length;
+  document.getElementById('stat-moto').textContent = allBookings.filter(b => b.service === 'motorbike').length;
+
+  // Recent bookings table
+  const tbody = document.getElementById('recent-bookings');
+  const recent = allBookings.slice(0, 5);
+  if (!recent.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No bookings yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = recent.map(b => `
+    <tr>
+      <td>${b.client_name || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${truncate(b.pickup, 20)} → ${truncate(b.dropoff, 20)}</td>
+      <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
+      <td>${statusBadge(b.status)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── CHART ──
+function buildChart() {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const now = new Date();
+  const revenues = days.map((_, i) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - (6 - i));
+    return allBookings
+      .filter(b => b.status === 'completed' && new Date(b.created_at).toDateString() === d.toDateString())
+      .reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+  });
+
+  if (revenueChart) revenueChart.destroy();
+  const ctx = document.getElementById('revenue-chart').getContext('2d');
+  revenueChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: days,
+      datasets: [{
+        label: 'Commission (GHS)',
+        data: revenues,
+        backgroundColor: '#c9a84c44',
+        borderColor: '#c9a84c',
+        borderWidth: 2,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', font: { size: 11 } } },
+        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', font: { size: 11 }, callback: v => 'GHS ' + v } }
+      }
+    }
+  });
+}
+
+// ── LIVE TICKER ──
+function startTicker() {
+  updateTicker();
+  setInterval(updateTicker, 5000);
+}
+
+function updateTicker() {
+  const active = allBookings.filter(b => b.status === 'accepted').length;
+  const pending = allBookings.filter(b => b.status === 'pending').length;
+  const today = new Date().toDateString();
+  const rev = allBookings
+    .filter(b => b.status === 'completed' && new Date(b.created_at).toDateString() === today)
+    .reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+
+  document.getElementById('tick-active').textContent = active;
+  document.getElementById('tick-drivers').textContent = allDrivers.filter(d => d.is_verified && !d.suspended).length;
+  document.getElementById('tick-revenue').textContent = `GHS ${rev.toFixed(0)}`;
+
+  // SOS check
+  const sosBookings = allBookings.filter(b => b.sos_triggered);
+  const sosDiv = document.getElementById('sos-alerts');
+  sosDiv.innerHTML = sosBookings.map(b => `
+    <div class="alert sos">
+      <span>🆘</span>
+      <span><strong>SOS ALERT</strong> — Booking #${b.id?.substring(0,8)}... — Client: ${b.client_name || 'Unknown'} — Pickup: ${b.pickup || 'Unknown'}</span>
+    </div>
+  `).join('');
+}
+
+// ── LIVE OPERATIONS ──
+function renderLiveOps() {
+  const active = allBookings.filter(b => ['pending', 'accepted'].includes(b.status));
+  const tbody = document.getElementById('active-rides-table');
+  if (!active.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">No active rides right now.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = active.map(b => `
+    <tr>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">${b.id?.substring(0,8)}...</td>
+      <td>${b.client_name || '—'}</td>
+      <td style="font-size:12px;color:var(--text-dim);">${truncate(b.pickup, 25)}</td>
+      <td style="font-size:12px;color:var(--text-dim);">${truncate(b.dropoff, 25)}</td>
+      <td>${b.driver_id ? `<span class="badge green">Assigned</span>` : '<span class="badge grey">Searching</span>'}</td>
+      <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
+      <td>${statusBadge(b.status)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── BOOKINGS TABLE ──
+function renderBookingsTable(list = allBookings) {
+  const tbody = document.getElementById('bookings-table');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);text-align:center;padding:24px;">No bookings found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(b => `
+    <tr>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">${b.id?.substring(0,8)}...</td>
+      <td>${b.client_name || '—'}</td>
+      <td style="font-size:12px;">${truncate(b.pickup, 20)}</td>
+      <td style="font-size:12px;">${truncate(b.dropoff, 20)}</td>
+      <td><span class="badge grey">${b.service || 'car'}</span></td>
+      <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
+      <td><span class="badge grey">${b.payment || 'cash'}</span></td>
+      <td>${statusBadge(b.status)}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${formatDate(b.created_at)}</td>
+    </tr>
+  `).join('');
+}
+
+function filterBookings() {
+  const q = document.getElementById('booking-search').value.toLowerCase();
+  const f = document.getElementById('booking-filter').value;
+  const filtered = allBookings.filter(b => {
+    const matchQ = !q || [b.client_name, b.pickup, b.dropoff, b.status].some(v => v?.toLowerCase().includes(q));
+    const matchF = !f || b.status === f;
+    return matchQ && matchF;
+  });
+  renderBookingsTable(filtered);
+}
+
+// ── DRIVERS TABLE ──
+function renderDriversTable(list = allDrivers) {
+  const tbody = document.getElementById('drivers-table');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">No drivers yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(d => `
+    <tr>
+      <td style="font-weight:600;">${d.full_name || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${d.email || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${d.phone_number || '—'}</td>
+      <td>${d.is_verified ? '<span class="badge green">✓ Verified</span>' : '<span class="badge grey">Pending</span>'}</td>
+      <td>${d.is_verified ? '<span class="badge green">Active</span>' : '<span class="badge grey">Not Verified</span>'}</td>
+      <td>${d.suspended ? '<span class="badge red">Suspended</span>' : '<span class="badge green">Active</span>'}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="openUserAction('${d.id}','${d.full_name}','driver')">Manage</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterDrivers() {
+  const q = document.getElementById('driver-search').value.toLowerCase();
+  renderDriversTable(allDrivers.filter(d => [d.full_name, d.email, d.phone_number].some(v => v?.toLowerCase().includes(q))));
+}
+
+// ── CLIENTS TABLE ──
+function renderClientsTable(list = allClients) {
+  const tbody = document.getElementById('clients-table');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:24px;">No clients yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(c => `
+    <tr>
+      <td style="font-weight:600;">${c.full_name || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${c.email || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${c.phone_number || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${formatDate(c.created_at)}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="openUserAction('${c.id}','${c.full_name}','client')">Manage</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterClients() {
+  const q = document.getElementById('client-search').value.toLowerCase();
+  renderClientsTable(allClients.filter(c => [c.full_name, c.email].some(v => v?.toLowerCase().includes(q))));
+}
+
+// ── USER ACTION MODAL ──
+function openUserAction(id, name, role) {
+  document.getElementById('user-modal-title').textContent = `Manage: ${name}`;
+  document.getElementById('user-modal-sub').textContent = `${role === 'driver' ? 'Driver' : 'Client'} account actions`;
+  document.getElementById('user-modal-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn btn-ghost" onclick="warnUser('${id}','${name}')">⚠️ Send Warning</button>
+      <button class="btn btn-ghost" onclick="suspendUser('${id}','${name}')">🚫 Suspend Account</button>
+      <button class="btn btn-red" onclick="banUser('${id}','${name}')">🔴 Permanently Ban</button>
+    </div>
+  `;
+  document.getElementById('user-modal').classList.add('open');
+}
+
+async function warnUser(id, name) {
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ warned: true }) });
+  document.getElementById('user-modal').classList.remove('open');
+  alert(`Warning sent to ${name}.`);
+}
+
+async function suspendUser(id, name) {
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ suspended: true, suspension_reason: 'Admin action' }) });
+  document.getElementById('user-modal').classList.remove('open');
+  await loadAll();
+  alert(`${name} has been suspended.`);
+}
+
+async function banUser(id, name) {
+  if (!confirm(`Permanently ban ${name}? This cannot be undone.`)) return;
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ suspended: true, suspension_reason: 'Permanent ban', is_verified: false }) });
+  document.getElementById('user-modal').classList.remove('open');
+  await loadAll();
+  alert(`${name} has been permanently banned.`);
+}
+
+// ── EARNINGS ──
+function calcEarnings() {
+  const completed = allBookings.filter(b => b.status === 'completed');
+  const total = completed.reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+  const month = new Date().getMonth();
+  const monthRev = completed
+    .filter(b => new Date(b.created_at).getMonth() === month)
+    .reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+  document.getElementById('earn-available').textContent = `GHS ${total.toFixed(2)}`;
+  document.getElementById('earn-total').textContent = `GHS ${total.toFixed(2)}`;
+  document.getElementById('earn-withdrawn').textContent = 'GHS 0.00';
+  document.getElementById('earn-month').textContent = `GHS ${monthRev.toFixed(2)}`;
+}
+
+// ── WITHDRAWAL WITH OTP ──
+function initiateWithdraw() {
+  const amount = parseFloat(document.getElementById('withdraw-amount').value);
+  if (!amount || amount < 1) { alert('Please enter a valid amount.'); return; }
+  otpAction = () => processWithdraw(amount);
+  document.getElementById('withdraw-modal').classList.remove('open');
+  document.getElementById('otp-desc').textContent = amount >= 5000
+    ? `GHS ${amount.toFixed(2)} withdrawal requires DOUBLE OTP. Enter the FIRST code sent to your phone.`
+    : `Enter the 6-digit code sent to your registered phone to confirm withdrawal of GHS ${amount.toFixed(2)}.`;
+  openOtp();
+}
+
+function processWithdraw(amount) {
+  alert(`✅ Withdrawal of GHS ${amount.toFixed(2)} via ${document.getElementById('withdraw-method').value} has been initiated.`);
+  const tbody = document.getElementById('withdrawal-history');
+  const row = `<tr><td>${new Date().toLocaleDateString()}</td><td style="color:var(--gold);">GHS ${amount.toFixed(2)}</td><td>${document.getElementById('withdraw-method').value}</td><td><span class="badge green">Processed</span></td></tr>`;
+  if (tbody.innerHTML.includes('No withdrawals')) tbody.innerHTML = row;
+  else tbody.innerHTML = row + tbody.innerHTML;
+}
+
+// ── OTP ──
+function openOtp() {
+  for (let i = 0; i < 6; i++) document.getElementById('otp' + i).value = '';
+  document.getElementById('otp-error').textContent = '';
+  document.getElementById('otp-modal').classList.add('open');
+  document.getElementById('otp0').focus();
+}
+
+function closeOtp() {
+  document.getElementById('otp-modal').classList.remove('open');
+  otpAction = null;
+}
+
+function otpNext(i) {
+  const val = document.getElementById('otp' + i).value;
+  if (val && i < 5) document.getElementById('otp' + (i + 1)).focus();
+}
+
+function verifyOtp() {
+  const code = [0,1,2,3,4,5].map(i => document.getElementById('otp' + i).value).join('');
+  if (code.length < 6) { document.getElementById('otp-error').textContent = 'Please enter all 6 digits.'; return; }
+  // For demo: accept any 6-digit code
+  document.getElementById('otp-modal').classList.remove('open');
+  if (otpAction) { otpAction(); otpAction = null; }
+}
+
+// ── CHANGE COMMISSION ──
+function changeCommission() {
+  const rate = document.getElementById('commission-rate').value;
+  otpAction = () => alert(`Commission rate updated to ${rate}%.`);
+  document.getElementById('otp-desc').textContent = `OTP required to change commission rate to ${rate}%.`;
+  openOtp();
+}
+
+function saveCode(type) {
+  otpAction = () => alert(`${type === 'founder' ? 'Founder' : 'Staff'} code updated successfully.`);
+  document.getElementById('otp-desc').textContent = `OTP required to change the ${type} code.`;
+  openOtp();
+}
+
+// ── NOTIFICATIONS ──
+function sendNotification() {
+  const title = document.getElementById('notif-title').value;
+  const body = document.getElementById('notif-body').value;
+  const target = document.getElementById('notif-target').value;
+  if (!title || !body) { alert('Please enter title and message.'); return; }
+  document.getElementById('notif-modal').classList.remove('open');
+  alert(`✅ Notification sent to ${target === 'all' ? 'all users' : target + ' only'}:\n"${title}" — ${body}`);
+}
+
+function sendNotification2() {
+  const title = document.getElementById('notif2-title').value;
+  const body = document.getElementById('notif2-body').value;
+  const target = document.getElementById('notif2-target').value;
+  if (!title || !body) { alert('Please enter title and message.'); return; }
+  alert(`✅ Notification sent to ${target === 'all' ? 'all users' : target + ' only'}:\n"${title}" — ${body}`);
+  document.getElementById('notif2-title').value = '';
+  document.getElementById('notif2-body').value = '';
+}
+
+// ── BIRTHDAY MODE ──
+function toggleBirthday() {
+  birthdayOn = !birthdayOn;
+  const tog = document.getElementById('birthday-toggle');
+  tog.classList.toggle('on', birthdayOn);
+  tog.nextElementSibling.textContent = birthdayOn ? 'Birthday mode is ON — tipping button active for 24 hours' : 'Birthday mode is OFF';
+  if (birthdayOn) alert('🎂 Birthday mode activated! All users will see a tipping button for 24 hours.');
+}
+
+// ── MAINTENANCE MODE ──
+function toggleMaintenance() {
+  maintenanceOn = !maintenanceOn;
+  const tog = document.getElementById('maintenance-toggle');
+  tog.classList.toggle('on', maintenanceOn);
+  tog.nextElementSibling.textContent = maintenanceOn ? '🔧 Maintenance mode is ON — users see updating screen' : 'Maintenance mode is OFF';
+}
+
+// ── HELPERS ──
+function truncate(str, n) { return str && str.length > n ? str.substring(0, n) + '...' : str || '—'; }
+function formatDate(d) { return d ? new Date(d).toLocaleDateString() : '—'; }
+function statusBadge(s) {
+  const map = { pending: 'gold', accepted: 'blue', completed: 'green', cancelled: 'red' };
+  return `<span class="badge ${map[s] || 'grey'}">${s || '—'}</span>`;
+}
+</script>
+</body>
+</html>
