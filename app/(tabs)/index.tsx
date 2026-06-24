@@ -3,9 +3,10 @@ import { WebView } from "react-native-webview";
 import { supabase } from '../../lib/supabase';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  SafeAreaView, TextInput, Alert, Switch, Image, Linking
+  TextInput, Alert, Switch, Image, Linking
 } from "react-native";
 import * as Location from "expo-location";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 
 // ============================================================
@@ -114,6 +115,11 @@ export default function App() {
   const [idPhoto, setIdPhoto] = useState<string | null>(null);
   const [licFront, setLicFront] = useState<string | null>(null);
   const [licBack, setLicBack] = useState<string | null>(null);
+  const [selfiePhoto, setSelfiePhoto] = useState<string | null>(null);
+  const [vehiclePhoto, setVehiclePhoto] = useState<string | null>(null);
+  const [foodSafetyCert, setFoodSafetyCert] = useState<string | null>(null);
+  const [restaurantPhoto, setRestaurantPhoto] = useState<string | null>(null);
+  const [businessName, setBusinessName] = useState("");
   const [vehMake, setVehMake] = useState("");
   const [vehModel, setVehModel] = useState("");
   const [vehYear, setVehYear] = useState("");
@@ -148,6 +154,7 @@ export default function App() {
   const [online, setOnline] = useState(false);
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const [driverWallet, setDriverWallet] = useState<any>(null);
+  const [driverRating, setDriverRating] = useState<number>(5.0);
   const [driverLiveLocation, setDriverLiveLocation] = useState<any>(null);
 
   // Chat
@@ -157,6 +164,9 @@ export default function App() {
   // Rating
   const [ratingBookingId, setRatingBookingId] = useState<string | null>(null);
   const [selectedRating, setSelectedRating] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [pendingRatingBookingId, setPendingRatingBookingId] = useState<string | null>(null);
 
   // SOS
   const [sosActive, setSosActive] = useState(false);
@@ -170,10 +180,16 @@ export default function App() {
   // ============================================================
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        const loc = await Location.getCurrentPositionAsync({});
-        setLocation(loc.coords);
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          setLocation(loc.coords);
+        }
+      } catch (e) {
+        console.log("Location unavailable — user can still search manually");
       }
     })();
   }, []);
@@ -207,6 +223,7 @@ export default function App() {
     }
     if (screen === "driverEarnings" || screen === "driverHome") {
       fetchWallet();
+      fetchDriverRating();
     }
   }, [screen]);
 
@@ -229,6 +246,19 @@ export default function App() {
     setDriverWallet(data || { balance: 0, total_earned: 0, total_withdrawn: 0, currency: "GHS" });
   };
 
+  const fetchDriverRating = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const driverId = u?.id || "00000000-0000-0000-0000-000000000002";
+    const { data } = await supabase
+      .from("reviews")
+      .select("rating")
+      .eq("pro_id", driverId);
+    if (data && data.length > 0) {
+      const avg = data.reduce((s: number, r: any) => s + r.rating, 0) / data.length;
+      setDriverRating(parseFloat(avg.toFixed(1)));
+    }
+  };
+
   const fetchClientBookings = async () => {
     const { data: { user: u } } = await supabase.auth.getUser();
     const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
@@ -239,9 +269,8 @@ export default function App() {
       .order("created_at", { ascending: false });
     if (data) {
       setClientBookings(data);
-      // Auto-trigger payment for any ride just marked completed that still needs MoMo/Card payment
-      // Only while the client is actively viewing My Bookings — never on app load or other screens
       if (screen === "myBookings") {
+        // Auto-trigger payment for completed MoMo/Card rides
         const needsPayment = data.find((b: any) =>
           b.status === "completed" &&
           b.payment !== "cash" &&
@@ -250,6 +279,17 @@ export default function App() {
         );
         if (needsPayment && pendingPaymentBookingId !== needsPayment.id) {
           triggerPaymentForBooking(needsPayment);
+          return;
+        }
+
+        // Auto-trigger rating modal for completed unrated rides
+        const needsRating = data.find((b: any) =>
+          b.status === "completed" &&
+          !b.rated &&
+          !showRatingModal
+        );
+        if (needsRating && pendingRatingBookingId !== needsRating.id) {
+          openRatingModal(needsRating.id);
         }
       }
     }
@@ -304,10 +344,16 @@ export default function App() {
     if (error) { Alert.alert("Error", error.message); return; }
     const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user?.id).single();
     if (!profile) { Alert.alert("Error", "Profile not found"); return; }
-    const u = { name: profile.full_name, email: profile.email, phone: profile.phone_number, role: profile.role, verified: profile.is_verified };
+    const u = { name: profile.full_name, email: profile.email, phone: profile.phone_number, role: profile.role, verified: profile.is_verified, suspended: profile.suspended };
     setUser(u);
-    if (u.role === "driver") { u.verified ? go("driverHome") : go("pending"); }
-    else { go("clientHome"); }
+    if (u.role === "client") { go("clientHome"); }
+    else {
+      if (u.suspended) {
+        Alert.alert("Account Suspended", "Your account has been suspended. Please contact support.");
+        return;
+      }
+      u.verified ? go("driverHome") : go("verify");
+    }
   };
 
   const doSignup = async () => {
@@ -324,8 +370,8 @@ export default function App() {
       is_verified: authRole === "client",
     });
     setUser({ name: authName, email: authEmail, phone: authPhone, role: authRole, verified: authRole === "client" });
-    if (authRole === "driver") { setVerifyStep(1); go("verify"); }
-    else { go("clientHome"); }
+    if (authRole === "client") { go("clientHome"); }
+    else { setVerifyStep(1); go("verify"); }
   };
 
   const logout = () => {
@@ -647,17 +693,21 @@ export default function App() {
   // DRIVER LOCATION
   // ============================================================
   const watchDriverLocation = async (bookingId: string) => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") return;
-    await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
-      (loc) => {
-        supabase.from("bookings").update({
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") return;
+      await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
+        (loc) => {
+          supabase.from("bookings").update({
           driver_lat: loc.coords.latitude,
           driver_lng: loc.coords.longitude,
         }).eq("id", bookingId);
       }
     );
+    } catch (e) {
+      console.log("Location tracking unavailable:", e);
+    }
   };
 
   // ============================================================
@@ -667,61 +717,171 @@ export default function App() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") { Alert.alert("Permission needed"); return; }
     const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaType.images,
       quality: 0.7,
     });
     if (!r.canceled) setter(r.assets[0].uri);
   };
 
   const submitVerify = async () => {
-    if (!idPhoto || !licFront || !licBack) { Alert.alert("Missing", "Please upload all documents"); return; }
-    if (!vehMake || !vehModel || !vehPlate) { Alert.alert("Missing", "Please fill vehicle info"); return; }
-    if (!roadWorthyExpiry || !registrationExpiry) { Alert.alert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
-
-    // Blueprint: "System detects expired Road Worthy and Registration and rejects automatically"
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const rwDate = new Date(roadWorthyExpiry);
-    const regDate = new Date(registrationExpiry);
-
-    if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) {
-      Alert.alert("Invalid Date", "Please enter valid expiry dates (YYYY-MM-DD).");
-      return;
-    }
-    if (rwDate < today) {
-      Alert.alert("Registration Rejected", "Your Road Worthy Certificate has expired. Please renew it and resubmit.");
-      return;
-    }
-    if (regDate < today) {
-      Alert.alert("Registration Rejected", "Your Vehicle Registration has expired. Please renew it and resubmit.");
-      return;
-    }
-
-    // All checks passed — Blueprint: "Auto approval — instant"
     const { data: { user: u } } = await supabase.auth.getUser();
-    const driverId = u?.id || "00000000-0000-0000-0000-000000000002";
+    const providerId = u?.id || "00000000-0000-0000-0000-000000000002";
 
-    await supabase.from("profiles").update({
-      is_verified: true,
-      vehicle_make: vehMake,
-      vehicle_model: vehModel,
-      vehicle_year: vehYear,
-      vehicle_plate: vehPlate,
-      road_worthy_expiry: roadWorthyExpiry,
-      registration_expiry: registrationExpiry,
-    }).eq("id", driverId);
+    // ── CAR DRIVER: Ghana Card + License + Road Worthy + Registration + Vehicle Photo + Selfie
+    if (authRole === "car_driver") {
+      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
+      if (!licFront || !licBack) { Alert.alert("Missing", "Please upload your Driver's License (front and back)"); return; }
+      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your vehicle"); return; }
+      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
+      if (!vehMake || !vehModel || !vehPlate) { Alert.alert("Missing", "Please fill all vehicle details"); return; }
+      if (!roadWorthyExpiry || !registrationExpiry) { Alert.alert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
 
+      const rwDate = new Date(roadWorthyExpiry);
+      const regDate = new Date(registrationExpiry);
+      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { Alert.alert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
+      if (rwDate < today) { Alert.alert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
+      if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
+
+      await supabase.from("profiles").update({
+        is_verified: true, vehicle_make: vehMake, vehicle_model: vehModel,
+        vehicle_year: vehYear, vehicle_plate: vehPlate,
+        road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry,
+      }).eq("id", providerId);
+    }
+
+    // ── TUK TUK: Ghana Card + Road Worthy + Registration + Vehicle Photo + Selfie (NO license)
+    else if (authRole === "tuktuk_driver") {
+      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
+      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your Tuk Tuk"); return; }
+      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
+      if (!vehMake || !vehPlate) { Alert.alert("Missing", "Please fill your Tuk Tuk details"); return; }
+      if (!roadWorthyExpiry || !registrationExpiry) { Alert.alert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
+
+      const rwDate = new Date(roadWorthyExpiry);
+      const regDate = new Date(registrationExpiry);
+      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { Alert.alert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
+      if (rwDate < today) { Alert.alert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
+      if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
+
+      await supabase.from("profiles").update({
+        is_verified: true, vehicle_make: vehMake, vehicle_plate: vehPlate,
+        road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry,
+      }).eq("id", providerId);
+    }
+
+    // ── MOTORBIKE: Ghana Card + Bike Photo + Selfie ONLY (no license, no road worthy, no registration)
+    else if (authRole === "motorbike_rider") {
+      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
+      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your bike"); return; }
+      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
+
+      await supabase.from("profiles").update({ is_verified: true }).eq("id", providerId);
+    }
+
+    // ── RESTAURANT/VENDOR: Ghana Card + Food Safety Cert + Restaurant Photo (menu handled separately)
+    else if (authRole === "restaurant") {
+      if (!idPhoto) { Alert.alert("Missing", "Please upload the owner's Ghana Card"); return; }
+      if (!foodSafetyCert) { Alert.alert("Missing", "Please upload your Food Safety Certificate"); return; }
+      if (!restaurantPhoto) { Alert.alert("Missing", "Please upload a photo of your restaurant or stall"); return; }
+      if (!businessName) { Alert.alert("Missing", "Please enter your business name"); return; }
+
+      await supabase.from("profiles").update({
+        is_verified: true, full_name: businessName,
+      }).eq("id", providerId);
+    }
+
+    // All checks passed — instant approval
     setUser((prev: any) => ({ ...prev, verified: true }));
+    const roleLabel = authRole === "car_driver" ? "Car Driver" : authRole === "tuktuk_driver" ? "Tuk Tuk Rider" : authRole === "motorbike_rider" ? "Motorbike Rider" : "Restaurant/Vendor";
     Alert.alert(
       "Verified! ✅",
-      "Your documents passed all checks. You're approved and ready to start driving!",
-      [{ text: "Start Driving", onPress: () => go("driverHome") }]
+      `Your documents passed all checks. You're approved as a ${roleLabel} on LuminaLinks!`,
+      [{ text: "Let's Go!", onPress: () => go("driverHome") }]
     );
   };
 
-  const rateDriver = (id: string, stars: number) => {
-    setClientBookings(prev => prev.map(b => b.id === id ? { ...b, rated: true, rating: stars } : b));
-    Alert.alert("Thanks!", "You rated " + stars + " stars!");
+  const openRatingModal = (bookingId: string) => {
+    setPendingRatingBookingId(bookingId);
+    setSelectedRating(0);
+    setRatingComment("");
+    setShowRatingModal(true);
+  };
+
+  const submitRating = async () => {
+    if (!selectedRating || selectedRating === 0) {
+      Alert.alert("Select Stars", "Please select at least 1 star before submitting.");
+      return;
+    }
+    setShowRatingModal(false);
+    await rateDriver(pendingRatingBookingId!, selectedRating, ratingComment);
+    setPendingRatingBookingId(null);
+    setRatingComment("");
+    setSelectedRating(0);
+  };
+
+  const rateDriver = async (bookingId: string, stars: number, comment: string = "") => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
+
+    const booking = clientBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+
+    const driverId = booking.driver_id;
+
+    // Save review to Supabase reviews table
+    await supabase.from("reviews").insert({
+      job_id: bookingId,
+      client_id: clientId,
+      pro_id: driverId,
+      rating: stars,
+      comments: comment,
+    });
+
+    // Mark booking as rated
+    await supabase.from("bookings").update({ rated: true, client_rating: stars }).eq("id", bookingId);
+    setClientBookings(prev => prev.map(b => b.id === bookingId ? { ...b, rated: true, rating: stars } : b));
+
+    // Calculate new driver average rating
+    if (driverId) {
+      const { data: reviews } = await supabase
+        .from("reviews")
+        .select("rating")
+        .eq("pro_id", driverId);
+
+      if (reviews && reviews.length > 0) {
+        const avg = reviews.reduce((s: number, r: any) => s + r.rating, 0) / reviews.length;
+        const avgRounded = parseFloat(avg.toFixed(2));
+
+        let updateData: any = { average_rating: avgRounded };
+
+        if (avgRounded < 3.0) {
+          updateData.suspended = true;
+          updateData.suspension_reason = `Rating dropped below 3.0 (current: ${avgRounded})`;
+          updateData.is_verified = false;
+        } else if (avgRounded < 3.5) {
+          updateData.suspended = true;
+          updateData.suspension_reason = `Temporary suspension — low rating (${avgRounded})`;
+        } else if (avgRounded < 4.0) {
+          updateData.warned = true;
+        } else if (avgRounded >= 4.5) {
+          updateData.suspended = false;
+          updateData.suspension_reason = null;
+        }
+
+        await supabase.from("profiles").update(updateData).eq("id", driverId);
+      }
+    }
+
+    const messages: { [key: number]: string } = {
+      5: "Amazing ride! ⭐⭐⭐⭐⭐",
+      4: "Great ride! ⭐⭐⭐⭐",
+      3: "Thanks for your feedback ⭐⭐⭐",
+      2: "Thanks for letting us know.",
+      1: "Sorry about that. Your feedback helps us improve.",
+    };
+    Alert.alert("Rating Submitted!", messages[stars] || "Thank you!");
     go("myBookings");
   };
 
@@ -775,6 +935,55 @@ export default function App() {
   // ============================================================
   // SCREENS
   // ============================================================
+  // RATING MODAL — must be checked BEFORE screen renders so it takes priority
+  if (showRatingModal) return (
+    <SafeAreaView style={s.safe}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+        <View style={{ backgroundColor: "#1a1a1a", borderRadius: 16, padding: 28, width: "100%", alignItems: "center" }}>
+          <Text style={{ fontSize: 40, marginBottom: 8 }}>{"🚗"}</Text>
+          <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 4 }}>How was your ride?</Text>
+          <Text style={{ color: "#888", fontSize: 13, textAlign: "center", marginBottom: 24 }}>Your feedback helps improve our service and keeps drivers accountable.</Text>
+
+          <Text style={{ color: "#c9a84c", fontSize: 13, fontWeight: "700", marginBottom: 12 }}>TAP TO RATE</Text>
+          <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
+            {[1, 2, 3, 4, 5].map(star => (
+              <TouchableOpacity key={star} onPress={() => setSelectedRating(star)}>
+                <Text style={{ fontSize: 44 }}>{star <= selectedRating ? "⭐" : "☆"}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {selectedRating > 0 && (
+            <Text style={{ color: "#c9a84c", fontSize: 14, fontWeight: "bold", marginBottom: 16 }}>
+              {selectedRating === 5 ? "Excellent!" : selectedRating === 4 ? "Great!" : selectedRating === 3 ? "Good" : selectedRating === 2 ? "Fair" : "Poor"}
+            </Text>
+          )}
+
+          <Text style={{ color: "#888", fontSize: 12, alignSelf: "flex-start", marginBottom: 6 }}>Comments (optional)</Text>
+          <TextInput
+            style={[s.input, { width: "100%", minHeight: 80, textAlignVertical: "top" }]}
+            placeholder="Tell us about your experience..."
+            placeholderTextColor="#555"
+            value={ratingComment}
+            onChangeText={setRatingComment}
+            multiline
+          />
+
+          <TouchableOpacity
+            style={[s.btn, { width: "100%", marginTop: 8, opacity: selectedRating === 0 ? 0.5 : 1 }]}
+            onPress={submitRating}>
+            <Text style={s.btnTxt}>Submit Rating</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ marginTop: 14 }}
+            onPress={() => { setShowRatingModal(false); go("myBookings"); }}>
+            <Text style={{ color: "#555", fontSize: 13 }}>Skip for now</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
 
   // WELCOME
   if (screen === "welcome") return (
@@ -802,29 +1011,33 @@ export default function App() {
         <Text style={s.navLogo}>Create Account</Text>
         <View />
       </View>
-      <View style={{ padding: 24, flex: 1, justifyContent: "center" }}>
+      <ScrollView contentContainerStyle={{ padding: 24 }}>
         <Text style={[s.title, { textAlign: "center" }]}>I am a...</Text>
-        <Text style={{ color: "#888", textAlign: "center", marginBottom: 32 }}>Choose your role</Text>
-        <TouchableOpacity
-          style={[s.roleBtn, { borderColor: authRole === "driver" ? "#c9a84c" : "#222", backgroundColor: authRole === "driver" ? "#2a2000" : "#1a1a1a" }]}
-          onPress={() => setAuthRole("driver")}>
-          <Text style={{ fontSize: 40 }}>{"🚗"}</Text>
-          <Text style={{ color: authRole === "driver" ? "#c9a84c" : "#fff", fontSize: 18, fontWeight: "bold", marginTop: 8 }}>Driver</Text>
-          <Text style={{ color: "#888", fontSize: 13, marginTop: 4, textAlign: "center" }}>Earn money providing rides</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.roleBtn, { borderColor: authRole === "client" ? "#2196f3" : "#222", backgroundColor: authRole === "client" ? "#001a2a" : "#1a1a1a" }]}
-          onPress={() => setAuthRole("client")}>
-          <Text style={{ fontSize: 40 }}>{"👤"}</Text>
-          <Text style={{ color: authRole === "client" ? "#2196f3" : "#fff", fontSize: 18, fontWeight: "bold", marginTop: 8 }}>Client</Text>
-          <Text style={{ color: "#888", fontSize: 13, marginTop: 4, textAlign: "center" }}>Book rides and services</Text>
-        </TouchableOpacity>
+        <Text style={{ color: "#888", textAlign: "center", marginBottom: 24 }}>Choose your role to get started</Text>
+
+        {[
+          { role: "client", icon: "👤", label: "Client", sub: "Book rides, deliveries and food", color: "#2196f3" },
+          { role: "car_driver", icon: "🚗", label: "Car Driver", sub: "Provide point-to-point rides", color: "#c9a84c" },
+          { role: "tuktuk_driver", icon: "🛺", label: "Tuk Tuk Rider", sub: "Affordable short distance trips", color: "#c9a84c" },
+          { role: "motorbike_rider", icon: "🏍️", label: "Motorbike Rider", sub: "Fast parcel and errand delivery", color: "#c9a84c" },
+          { role: "restaurant", icon: "🍔", label: "Restaurant / Vendor", sub: "List your food for delivery", color: "#4caf50" },
+        ].map(({ role, icon, label, sub, color }) => (
+          <TouchableOpacity
+            key={role}
+            style={[s.roleBtn, { borderColor: authRole === role ? color : "#222", backgroundColor: authRole === role ? color + "22" : "#1a1a1a", marginBottom: 12 }]}
+            onPress={() => setAuthRole(role)}>
+            <Text style={{ fontSize: 36 }}>{icon}</Text>
+            <Text style={{ color: authRole === role ? color : "#fff", fontSize: 16, fontWeight: "bold", marginTop: 6 }}>{label}</Text>
+            <Text style={{ color: "#888", fontSize: 12, marginTop: 4, textAlign: "center" }}>{sub}</Text>
+          </TouchableOpacity>
+        ))}
+
         {authRole && (
-          <TouchableOpacity style={s.btn} onPress={() => go("auth")}>
-            <Text style={s.btnTxt}>Continue as {authRole === "driver" ? "Driver" : "Client"}</Text>
+          <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={() => go("auth")}>
+            <Text style={s.btnTxt}>Continue</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 
@@ -865,82 +1078,236 @@ export default function App() {
   if (screen === "verify") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <View /><Text style={s.navLogo}>Driver Verification</Text><View />
+        <View />
+        <Text style={s.navLogo}>
+          {authRole === "car_driver" ? "Car Driver Verification" :
+           authRole === "tuktuk_driver" ? "Tuk Tuk Verification" :
+           authRole === "motorbike_rider" ? "Motorbike Verification" :
+           authRole === "restaurant" ? "Restaurant Verification" : "Verification"}
+        </Text>
+        <TouchableOpacity onPress={logout}><Text style={s.navLink}>Log Out</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>Welcome, {user?.name}!</Text>
-        <Text style={{ color: "#888", fontSize: 14, marginBottom: 20 }}>Complete verification to start driving</Text>
+        <Text style={{ color: "#888", fontSize: 13, marginBottom: 4 }}>
+          {authRole === "motorbike_rider"
+            ? "Quick 2-step verification — no road worthy or registration required for motorbike riders."
+            : "Complete all steps below — approval is instant once everything is submitted."}
+        </Text>
+        <Text style={{ color: "#555", fontSize: 11, marginBottom: 20 }}>Expired documents are automatically rejected.</Text>
 
+        {/* ── STEP 1: GHANA CARD (all roles) ── */}
         {verifyStep === 1 && (
           <>
-            <Text style={s.sectionTitle}>STEP 1 OF 3 — IDENTITY DOCUMENT</Text>
+            <Text style={s.sectionTitle}>STEP 1 — GHANA CARD</Text>
             <View style={s.verifyStep}>
               <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>1</Text></View>
               <View>
-                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Ghana Card</Text>
-                <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Clear photo of your Ghana Card (front and back)</Text>
+                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>
+                  {authRole === "restaurant" ? "Owner's Ghana Card" : "Ghana Card"}
+                </Text>
+                <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>
+                  {authRole === "restaurant" ? "Clear photo of the business owner's Ghana Card" : "Clear photo of your Ghana Card (front and back)"}
+                </Text>
               </View>
             </View>
             <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setIdPhoto)}>
-              {idPhoto
-                ? <Image source={{ uri: idPhoto }} style={s.uploadImg} />
-                : <><Text style={{ fontSize: 40 }}>{"🪪"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload Ghana Card</Text></>
-              }
+              {idPhoto ? <Image source={{ uri: idPhoto }} style={s.uploadImg} /> :
+                <><Text style={{ fontSize: 40 }}>{"🪪"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload Ghana Card</Text></>}
             </TouchableOpacity>
-            {idPhoto && <TouchableOpacity style={s.btn} onPress={() => setVerifyStep(2)}><Text style={s.btnTxt}>Next: Drivers License</Text></TouchableOpacity>}
+            {idPhoto && (
+              <TouchableOpacity style={s.btn} onPress={() => setVerifyStep(2)}>
+                <Text style={s.btnTxt}>
+                  {authRole === "car_driver" ? "Next: Driver's License" :
+                   authRole === "restaurant" ? "Next: Food Safety Certificate" :
+                   "Next: Vehicle/Bike Photo"}
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
 
+        {/* ── STEP 2: DRIVER'S LICENSE (car driver only) or VEHICLE PHOTO (tuktuk/motorbike) or FOOD SAFETY (restaurant) ── */}
         {verifyStep === 2 && (
           <>
-            <Text style={s.sectionTitle}>STEP 2 OF 3 — DRIVERS LICENSE</Text>
-            <View style={s.verifyStep}>
-              <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>2</Text></View>
-              <View>
-                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Drivers License</Text>
-                <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Upload front and back</Text>
-              </View>
-            </View>
-            <Text style={{ color: "#888", marginBottom: 6 }}>Front side:</Text>
-            <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicFront)}>
-              {licFront ? <Image source={{ uri: licFront }} style={s.uploadImg} /> : <><Text style={{ fontSize: 36 }}>{"📄"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload front</Text></>}
-            </TouchableOpacity>
-            <Text style={{ color: "#888", marginBottom: 6 }}>Back side:</Text>
-            <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicBack)}>
-              {licBack ? <Image source={{ uri: licBack }} style={s.uploadImg} /> : <><Text style={{ fontSize: 36 }}>{"📄"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload back</Text></>}
-            </TouchableOpacity>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(1)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
-              {licFront && licBack && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={() => setVerifyStep(3)}><Text style={s.btnTxt}>Next: Vehicle</Text></TouchableOpacity>}
-            </View>
+            {authRole === "car_driver" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 2 — DRIVER'S LICENSE</Text>
+                <View style={s.verifyStep}>
+                  <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>2</Text></View>
+                  <View>
+                    <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Driver's License</Text>
+                    <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Upload front and back</Text>
+                  </View>
+                </View>
+                <Text style={{ color: "#888", marginBottom: 6 }}>Front side:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicFront)}>
+                  {licFront ? <Image source={{ uri: licFront }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"📄"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload front</Text></>}
+                </TouchableOpacity>
+                <Text style={{ color: "#888", marginBottom: 6 }}>Back side:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicBack)}>
+                  {licBack ? <Image source={{ uri: licBack }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"📄"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload back</Text></>}
+                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(1)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {licFront && licBack && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={() => setVerifyStep(3)}><Text style={s.btnTxt}>Next: Vehicle Photo</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
+
+            {(authRole === "tuktuk_driver" || authRole === "motorbike_rider") && (
+              <>
+                <Text style={s.sectionTitle}>STEP 2 — {authRole === "tuktuk_driver" ? "TUK TUK" : "BIKE"} PHOTO</Text>
+                <View style={s.verifyStep}>
+                  <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>2</Text></View>
+                  <View>
+                    <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>{authRole === "tuktuk_driver" ? "Tuk Tuk Photo" : "Bike Photo"}</Text>
+                    <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Clear photo showing your {authRole === "tuktuk_driver" ? "tuk tuk" : "bike"}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setVehiclePhoto)}>
+                  {vehiclePhoto ? <Image source={{ uri: vehiclePhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"📸"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload photo</Text></>}
+                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(1)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {vehiclePhoto && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={() => setVerifyStep(3)}><Text style={s.btnTxt}>Next: Live Selfie</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
+
+            {authRole === "restaurant" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 2 — FOOD SAFETY CERTIFICATE</Text>
+                <View style={s.verifyStep}>
+                  <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>2</Text></View>
+                  <View>
+                    <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Food Safety Certificate</Text>
+                    <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Proves food is prepared safely</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setFoodSafetyCert)}>
+                  {foodSafetyCert ? <Image source={{ uri: foodSafetyCert }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"📋"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload certificate</Text></>}
+                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(1)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {foodSafetyCert && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={() => setVerifyStep(3)}><Text style={s.btnTxt}>Next: Restaurant Photo</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
           </>
         )}
 
+        {/* ── STEP 3: VEHICLE PHOTO + SELFIE (car driver) / SELFIE (tuktuk/motorbike) / RESTAURANT PHOTO + BUSINESS NAME (restaurant) ── */}
         {verifyStep === 3 && (
           <>
-            <Text style={s.sectionTitle}>STEP 3 OF 3 — VEHICLE INFO</Text>
-            <View style={s.verifyStep}>
-              <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>3</Text></View>
-              <View>
-                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Your Vehicle</Text>
-                <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>Details of vehicle you will use</Text>
-              </View>
-            </View>
+            {authRole === "car_driver" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 3 — VEHICLE PHOTO & SELFIE</Text>
+                <Text style={{ color: "#888", marginBottom: 6 }}>Vehicle photo:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setVehiclePhoto)}>
+                  {vehiclePhoto ? <Image source={{ uri: vehiclePhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"🚗"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload vehicle photo</Text></>}
+                </TouchableOpacity>
+                <Text style={{ color: "#888", marginBottom: 6 }}>Live selfie:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setSelfiePhoto)}>
+                  {selfiePhoto ? <Image source={{ uri: selfiePhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"🤳"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload selfie</Text></>}
+                </TouchableOpacity>
+                {vehiclePhoto && selfiePhoto && <TouchableOpacity style={s.btn} onPress={() => setVerifyStep(4)}><Text style={s.btnTxt}>Next: Vehicle Details</Text></TouchableOpacity>}
+                <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={() => setVerifyStep(2)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+              </>
+            )}
+
+            {authRole === "tuktuk_driver" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 3 — LIVE SELFIE & VEHICLE DETAILS</Text>
+                <Text style={{ color: "#888", marginBottom: 6 }}>Live selfie:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setSelfiePhoto)}>
+                  {selfiePhoto ? <Image source={{ uri: selfiePhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"🤳"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload selfie</Text></>}
+                </TouchableOpacity>
+                {selfiePhoto && (
+                  <>
+                    <TextInput style={s.input} placeholder="Tuk Tuk Make/Brand" placeholderTextColor="#555" value={vehMake} onChangeText={setVehMake} />
+                    <TextInput style={s.input} placeholder="Plate Number" placeholderTextColor="#555" value={vehPlate} onChangeText={setVehPlate} autoCapitalize="characters" />
+                    <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6 }}>Road Worthy Certificate Expiry</Text>
+                    <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#555" value={roadWorthyExpiry} onChangeText={setRoadWorthyExpiry} />
+                    <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6 }}>Vehicle Registration Expiry</Text>
+                    <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#555" value={registrationExpiry} onChangeText={setRegistrationExpiry} />
+                    <Text style={{ color: "#555", fontSize: 11, marginBottom: 8 }}>Expired documents are automatically rejected.</Text>
+                  </>
+                )}
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(2)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {selfiePhoto && vehMake && vehPlate && roadWorthyExpiry && registrationExpiry &&
+                    <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={submitVerify}><Text style={s.btnTxt}>Verify Instantly</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
+
+            {authRole === "motorbike_rider" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 3 — LIVE SELFIE</Text>
+                <View style={s.verifyStep}>
+                  <View style={s.verifyNum}><Text style={{ color: "#000", fontWeight: "bold" }}>3</Text></View>
+                  <View>
+                    <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Live Selfie</Text>
+                    <Text style={{ color: "#888", fontSize: 12, marginTop: 2 }}>A clear selfie for identity confirmation</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setSelfiePhoto)}>
+                  {selfiePhoto ? <Image source={{ uri: selfiePhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"🤳"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload selfie</Text></>}
+                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(2)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {selfiePhoto && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={submitVerify}><Text style={s.btnTxt}>Verify Instantly</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
+
+            {authRole === "restaurant" && (
+              <>
+                <Text style={s.sectionTitle}>STEP 3 — RESTAURANT DETAILS</Text>
+                <TextInput style={s.input} placeholder="Business/Restaurant Name" placeholderTextColor="#555" value={businessName} onChangeText={setBusinessName} />
+                <Text style={{ color: "#888", marginBottom: 6 }}>Restaurant or stall photo:</Text>
+                <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setRestaurantPhoto)}>
+                  {restaurantPhoto ? <Image source={{ uri: restaurantPhoto }} style={s.uploadImg} /> :
+                    <><Text style={{ fontSize: 36 }}>{"🍽️"}</Text><Text style={{ color: "#888", marginTop: 8 }}>Tap to upload restaurant photo</Text></>}
+                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(2)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+                  {restaurantPhoto && businessName && <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={submitVerify}><Text style={s.btnTxt}>Verify Instantly</Text></TouchableOpacity>}
+                </View>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ── STEP 4: VEHICLE DETAILS (car driver only) ── */}
+        {verifyStep === 4 && authRole === "car_driver" && (
+          <>
+            <Text style={s.sectionTitle}>STEP 4 — VEHICLE DETAILS</Text>
             <TextInput style={s.input} placeholder="Vehicle Make (e.g. Toyota)" placeholderTextColor="#555" value={vehMake} onChangeText={setVehMake} />
             <TextInput style={s.input} placeholder="Vehicle Model (e.g. Corolla)" placeholderTextColor="#555" value={vehModel} onChangeText={setVehModel} />
             <TextInput style={s.input} placeholder="Year (e.g. 2020)" placeholderTextColor="#555" value={vehYear} onChangeText={setVehYear} keyboardType="numeric" />
             <TextInput style={s.input} placeholder="Plate Number" placeholderTextColor="#555" value={vehPlate} onChangeText={setVehPlate} autoCapitalize="characters" />
-            <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6, marginTop: 4 }}>Road Worthy Certificate Expiry Date</Text>
+            <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6, marginTop: 4 }}>Road Worthy Certificate Expiry</Text>
             <TextInput style={s.input} placeholder="YYYY-MM-DD (e.g. 2027-03-15)" placeholderTextColor="#555" value={roadWorthyExpiry} onChangeText={setRoadWorthyExpiry} />
-            <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6 }}>Vehicle Registration Expiry Date</Text>
+            <Text style={{ color: "#c9a84c", fontSize: 12, marginBottom: 6 }}>Vehicle Registration Expiry</Text>
             <TextInput style={s.input} placeholder="YYYY-MM-DD (e.g. 2027-03-15)" placeholderTextColor="#555" value={registrationExpiry} onChangeText={setRegistrationExpiry} />
-            <Text style={{ color: "#555", fontSize: 11, marginBottom: 8 }}>Documents are checked automatically — expired documents are rejected instantly.</Text>
+            <Text style={{ color: "#555", fontSize: 11, marginBottom: 8 }}>Expired documents are automatically rejected.</Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(2)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
+              <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => setVerifyStep(3)}><Text style={s.btnOutTxt}>Back</Text></TouchableOpacity>
               <TouchableOpacity style={[s.btn, { flex: 2 }]} onPress={submitVerify}><Text style={s.btnTxt}>Verify Instantly</Text></TouchableOpacity>
             </View>
           </>
         )}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -983,7 +1350,7 @@ export default function App() {
         <View style={s.row}>
           <View style={s.statCard}><Text style={s.statVal}>GHS {driverWallet?.balance?.toFixed(2) || "0.00"}</Text><Text style={s.statLabel}>Wallet</Text></View>
           <View style={s.statCard}><Text style={s.statVal}>{driverBookings.filter(b => b.status === "completed").length}</Text><Text style={s.statLabel}>Rides</Text></View>
-          <View style={s.statCard}><Text style={s.statVal}>{"⭐"} 5.0</Text><Text style={s.statLabel}>Rating</Text></View>
+          <View style={s.statCard}><Text style={s.statVal}>{"⭐"} {driverRating}</Text><Text style={s.statLabel}>Rating</Text></View>
         </View>
 
         <Text style={s.sectionTitle}>QUICK ACTIONS</Text>
@@ -1160,6 +1527,9 @@ export default function App() {
           <Text style={s.cardSub}>{user?.phone}</Text>
           <View style={[s.badge, { backgroundColor: "#1a3a1a" }]}>
             <Text style={{ color: "#4caf50", fontSize: 12 }}>{"✅"} Verified Driver</Text>
+          </View>
+          <View style={[s.badge, { backgroundColor: "#1a2a1a", marginTop: 6 }]}>
+            <Text style={{ color: "#c9a84c", fontSize: 12 }}>{"⭐"} {driverRating} average rating</Text>
           </View>
         </View>
         <Text style={s.sectionTitle}>COMMISSION RATE</Text>
@@ -1370,16 +1740,9 @@ export default function App() {
                 </TouchableOpacity>
               )}
               {b.status === "completed" && !b.rated && (
-                <View>
-                  <Text style={{ color: "#888", marginTop: 8, marginBottom: 4 }}>Rate your driver:</Text>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    {[1, 2, 3, 4, 5].map(star => (
-                      <TouchableOpacity key={star} onPress={() => rateDriver(b.id, star)}>
-                        <Text style={{ fontSize: 24 }}>{star <= (b.rating || 0) ? "⭐" : "☆"}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+                <TouchableOpacity style={[s.btnGreen, { marginTop: 8 }]} onPress={() => openRatingModal(b.id)}>
+                  <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"⭐"} Rate Your Driver</Text>
+                </TouchableOpacity>
               )}
             </View>
           ))
