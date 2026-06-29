@@ -58,17 +58,34 @@ const getDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
 // Tuk Tuk: GHS 3 base + GHS 5/km, min GHS 10
 // Motorbike: GHS 4 base + GHS 6/km, min GHS 15
 // ============================================================
+// Blueprint night time pricing — 5 time bands
+const getNightMultiplier = () => {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour < 20) return { multiplier: 1.0, label: "Standard Hours", color: "#4caf50" };
+  if (hour >= 20 && hour < 22) return { multiplier: 1.2, label: "Evening x1.2", color: "#ff9800" };
+  if (hour >= 22 && hour < 24) return { multiplier: 1.5, label: "Night x1.5", color: "#f5a623" };
+  if (hour >= 0 && hour < 4) return { multiplier: 2.0, label: "Late Night x2.0", color: "#f44336" };
+  if (hour >= 4 && hour < 6) return { multiplier: 1.5, label: "Early Morning x1.5", color: "#f5a623" };
+  return { multiplier: 1.0, label: "Standard Hours", color: "#4caf50" };
+};
+
 const calcFare = (km: number, service: string = "car", pendingCount: number = 0) => {
   const surgeMultiplier =
     pendingCount >= 10 ? 1.5 :
     pendingCount >= 5 ? 1.25 :
     pendingCount >= 3 ? 1.1 : 1.0;
 
+  const { multiplier: nightMultiplier } = getNightMultiplier();
+
+  // Both surge and night pricing apply — highest multiplier wins per blueprint
+  // "Surge pricing only increases never decreases"
+  const finalMultiplier = Math.max(surgeMultiplier, nightMultiplier);
+
   let base = 5.0, perKm = 8.0, minFare = 20;
   if (service === "tuktuk") { base = 3.0; perKm = 5.0; minFare = 10; }
   if (service === "motorbike") { base = 4.0; perKm = 6.0; minFare = 15; }
 
-  const fare = Math.max(minFare, base + km * perKm) * surgeMultiplier;
+  const fare = Math.max(minFare, base + km * perKm) * finalMultiplier;
   const commission = fare * 0.15;
   const driverEarns = fare - commission;
   return { fare: parseFloat(fare.toFixed(2)), commission: parseFloat(commission.toFixed(2)), driverEarns: parseFloat(driverEarns.toFixed(2)) };
@@ -144,11 +161,19 @@ export default function App() {
   const [estFare, setEstFare] = useState<number | null>(null);
   const [estKm, setEstKm] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoApplied, setPromoApplied] = useState<any>(null);
+  const [promoError, setPromoError] = useState("");
+  const [promoCredit, setPromoCredit] = useState(0);
   const [showPaystack, setShowPaystack] = useState(false);
   const [pendingPaymentBookingId, setPendingPaymentBookingId] = useState<string | null>(null);
   const [clientBookings, setClientBookings] = useState<any[]>([]);
   const [driverBookings, setDriverBookings] = useState<any[]>([]);
   const [activeBookingId, setActiveBookingId] = useState<string | null>(null);
+  const [bookingAcceptedAt, setBookingAcceptedAt] = useState<Date | null>(null);
+  const [driverArrivedAt, setDriverArrivedAt] = useState<Date | null>(null);
+  const [waitingCharge, setWaitingCharge] = useState(0);
+  const [waitingTimer, setWaitingTimer] = useState<any>(null);
 
   // Driver
   const [online, setOnline] = useState(false);
@@ -166,6 +191,9 @@ export default function App() {
   const [selectedRating, setSelectedRating] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [showTipModal, setShowTipModal] = useState(false);
+  const [tipAmount, setTipAmount] = useState(0);
+  const [tipBookingId, setTipBookingId] = useState<string | null>(null);
   const [pendingRatingBookingId, setPendingRatingBookingId] = useState<string | null>(null);
 
   // SOS
@@ -225,6 +253,9 @@ export default function App() {
       fetchWallet();
       fetchDriverRating();
     }
+    if (screen === "clientHome") {
+      fetchClientProfile();
+    }
   }, [screen]);
 
   const fetchDriverBookings = async () => {
@@ -256,6 +287,20 @@ export default function App() {
     if (data && data.length > 0) {
       const avg = data.reduce((s: number, r: any) => s + r.rating, 0) / data.length;
       setDriverRating(parseFloat(avg.toFixed(1)));
+    }
+  };
+
+  const fetchClientProfile = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (!u) return;
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("promo_credit, referral_code, full_name")
+      .eq("id", u.id)
+      .maybeSingle();
+    if (profile) {
+      setPromoCredit(profile.promo_credit || 0);
+      setUser((prev: any) => ({ ...prev, referralCode: profile.referral_code, name: profile.full_name }));
     }
   };
 
@@ -344,9 +389,11 @@ export default function App() {
     if (error) { Alert.alert("Error", error.message); return; }
     const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user?.id).single();
     if (!profile) { Alert.alert("Error", "Profile not found"); return; }
-    const u = { name: profile.full_name, email: profile.email, phone: profile.phone_number, role: profile.role, verified: profile.is_verified, suspended: profile.suspended };
+    const role = profile.role || profile.account_type || "client";
+    const u = { name: profile.full_name, email: profile.email, phone: profile.phone_number, role, verified: profile.is_verified, suspended: profile.suspended, referralCode: profile.referral_code };
     setUser(u);
-    if (u.role === "client") { go("clientHome"); }
+    const isDriver = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(role);
+    if (!isDriver) { go("clientHome"); }
     else {
       if (u.suspended) {
         Alert.alert("Account Suspended", "Your account has been suspended. Please contact support.");
@@ -361,6 +408,7 @@ export default function App() {
     if (authPass !== authConfirm) { Alert.alert("Error", "Passwords do not match"); return; }
     const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPass });
     if (error) { Alert.alert("Error", error.message); return; }
+    const refCode = generateReferralCode(authName);
     await supabase.from("profiles").insert({
       id: data.user?.id,
       full_name: authName,
@@ -368,9 +416,14 @@ export default function App() {
       phone_number: authPhone,
       role: authRole,
       is_verified: authRole === "client",
+      referral_code: refCode,
+      promo_credit: 0,
+      welcome_discount_used: false,
+      first_ride_done: false,
     });
     setUser({ name: authName, email: authEmail, phone: authPhone, role: authRole, verified: authRole === "client" });
-    if (authRole === "client") { go("clientHome"); }
+    const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "home_service"].includes(authRole || "");
+    if (!isDriverRole) { go("clientHome"); }
     else { setVerifyStep(1); go("verify"); }
   };
 
@@ -434,16 +487,17 @@ export default function App() {
 
   const submitRide = () => {
     if (!pickupText || !dropoffText) { Alert.alert("Missing", "Please enter pickup and dropoff"); return; }
+    const originalFare = estFare || 20;
+    const finalFare = calcDiscountedFare(originalFare);
     const methodLabel = paymentMethod === "momo" ? "Mobile Money" : paymentMethod === "card" ? "Card" : "Cash";
-    const timingNote = paymentMethod === "cash"
-      ? "You will pay the driver directly."
-      : "You will be charged automatically once the ride is complete.";
+    const timingNote = paymentMethod === "cash" ? "You will pay the driver directly." : "You will be charged automatically once the ride is complete.";
+    const promoNote = promoApplied ? `\nPromo: ${promoApplied.label}` : "";
     Alert.alert(
       "Confirm Booking",
-      `Fare: GHS ${estFare || 20}\nPayment: ${methodLabel}\n\n${timingNote}`,
+      `Fare: GHS ${finalFare}${promoApplied && finalFare !== originalFare ? ` (was GHS ${originalFare})` : ""}\nPayment: ${methodLabel}${promoNote}\n\n${timingNote}`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Book Ride", onPress: () => processBooking() },
+        { text: "Book Ride", onPress: () => processBooking(finalFare) },
       ]
     );
   };
@@ -485,8 +539,49 @@ export default function App() {
     setShowPaystack(true);
   };
 
-  const processBooking = async () => {
-    const fare = estFare || 20;
+  const processBooking = async (finalFare?: number) => {
+    const fare = finalFare !== undefined ? finalFare : (estFare || 20);
+
+    // Auto-apply promo credit if client has any (expires after 7 days — simplified: deduct immediately)
+    if (!promoApplied && promoCredit > 0) {
+      const creditToUse = Math.min(promoCredit, fare);
+      const fareAfterCredit = parseFloat((fare - creditToUse).toFixed(2));
+      Alert.alert(
+        "💰 Promo Credit Applied!",
+        `GHS ${creditToUse} credit used. Fare reduced from GHS ${fare} to GHS ${fareAfterCredit}.`,
+        [{ text: "Great!", onPress: async () => {
+          // Deduct credit from profile
+          const { data: { user: u } } = await supabase.auth.getUser();
+          if (u) {
+            await supabase.from("profiles").update({ promo_credit: promoCredit - creditToUse }).eq("id", u.id);
+            setPromoCredit(promoCredit - creditToUse);
+          }
+          await doProcessBooking(fareAfterCredit);
+        }}]
+      );
+      return;
+    }
+
+    // Check and apply welcome discount if eligible and no promo already applied
+    if (!promoApplied) {
+      const eligible = await checkAndApplyWelcomeDiscount();
+      if (eligible) {
+        const welcomeFare = parseFloat((fare * 0.75).toFixed(2));
+        Alert.alert(
+          "🎉 Welcome Discount!",
+          `25% off your first ride! Fare reduced from GHS ${fare} to GHS ${welcomeFare}.`,
+          [{ text: "Great!", onPress: async () => {
+            await markWelcomeDiscountUsed();
+            await doProcessBooking(welcomeFare);
+          }}]
+        );
+        return;
+      }
+    }
+    await doProcessBooking(fare);
+  };
+
+  const doProcessBooking = async (fare: number) => {
     const booking = await saveBookingToSupabase(pickupText, dropoffText, selectedService, fare);
     const nb = {
       id: booking?.id || Date.now().toString(),
@@ -499,10 +594,19 @@ export default function App() {
       dropoff: dropoffText,
       payment: paymentMethod,
       km: estKm,
+      promo_code: promoApplied?.type || null,
     };
     setClientBookings(prev => [nb, ...prev]);
-    Alert.alert("Ride Booked!", `Driver is being assigned. Fare: GHS ${fare}`, [{ text: "OK", onPress: () => go("myBookings") }]);
-    setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null); setEstFare(null); setEstKm(null);
+
+    // Handle referral reward if promo was a referral code
+    if (promoApplied?.type === "referral" && promoApplied?.referrerId && booking?.id) {
+      await handleReferralReward(booking.id, promoApplied.referrerId);
+    }
+
+    const fareLabel = promoApplied?.discount >= 100 ? "FREE RIDE" : `GHS ${fare}`;
+    Alert.alert("Ride Booked! 🚗", `Driver is being assigned. Fare: ${fareLabel}`, [{ text: "OK", onPress: () => go("myBookings") }]);
+    setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null);
+    setEstFare(null); setEstKm(null); setPromoCode(""); setPromoApplied(null); setPromoError("");
   };
 
 
@@ -512,9 +616,11 @@ export default function App() {
     const { error } = await supabase.from("bookings").update({
       status: "accepted",
       driver_id: driverId,
+      accepted_at: new Date().toISOString(),
     }).eq("id", bookingId);
     if (!error) {
       setActiveBookingId(bookingId);
+      setBookingAcceptedAt(new Date());
       fetchMessages(bookingId);
       watchDriverLocation(bookingId);
       go("activeRide");
@@ -563,6 +669,113 @@ export default function App() {
     Alert.alert("Ride Complete!", "If the client chose MoMo or Card, they'll be prompted to pay now.", [{ text: "OK", onPress: () => go("driverHome") }]);
     setActiveBookingId(null);
     fetchDriverBookings();
+  };
+
+  // ============================================================
+  // WAITING CHARGES — Blueprint: 0-5 mins free, GHS 1/min after, auto-cancel at 15 mins
+  // ============================================================
+  const startWaitingTimer = (bookingId: string) => {
+    const startTime = new Date();
+    setDriverArrivedAt(startTime);
+    setWaitingCharge(0);
+
+    const timer = setInterval(async () => {
+      const elapsed = Math.floor((new Date().getTime() - startTime.getTime()) / 60000);
+
+      if (elapsed > 15) {
+        // Auto-cancel after 15 mins — GHS 10 to driver
+        clearInterval(timer);
+        setWaitingTimer(null);
+        await supabase.from("bookings").update({
+          status: "cancelled",
+          cancellation_charge: 10,
+          cancellation_reason: "Client no-show — auto cancelled after 15 minutes",
+        }).eq("id", bookingId);
+        Alert.alert("Auto Cancelled", "Client did not show up. GHS 10 cancellation fee has been added to your wallet.");
+        creditDriverWallet(10, bookingId);
+        go("driverHome");
+      } else if (elapsed > 5) {
+        // GHS 1/min after 5 free minutes
+        const charge = (elapsed - 5) * 1;
+        setWaitingCharge(charge);
+        await supabase.from("bookings").update({ waiting_charge: charge }).eq("id", bookingId);
+      }
+    }, 60000); // Check every minute
+
+    setWaitingTimer(timer);
+  };
+
+  const stopWaitingTimer = () => {
+    if (waitingTimer) { clearInterval(waitingTimer); setWaitingTimer(null); }
+    setWaitingCharge(0);
+    setDriverArrivedAt(null);
+  };
+
+  const creditDriverWallet = async (amount: number, bookingId: string) => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const driverId = u?.id || "00000000-0000-0000-0000-000000000002";
+    const { data: wallet } = await supabase.from("wallets").select("*").eq("user_id", driverId).maybeSingle();
+    if (wallet) {
+      await supabase.from("wallets").update({
+        balance: parseFloat((wallet.balance + amount).toFixed(2)),
+        total_earned: parseFloat((wallet.total_earned + amount).toFixed(2)),
+        last_updated: new Date().toISOString(),
+      }).eq("user_id", driverId);
+    }
+  };
+
+  // ============================================================
+  // CANCELLATION CHARGES — Blueprint spec
+  // ============================================================
+  const cancelBooking = async (bookingId: string, byClient: boolean = true) => {
+    const booking = byClient ? clientBookings.find(b => b.id === bookingId) : driverBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+
+    const now = new Date();
+    let charge = 0;
+    let reason = "";
+
+    if (byClient) {
+      if (booking.status === "pending") {
+        // Cancel before acceptance — free
+        charge = 0; reason = "Cancelled before driver accepted";
+      } else if (booking.status === "accepted") {
+        const acceptedTime = new Date(booking.accepted_at || now);
+        const minutesSinceAccepted = (now.getTime() - acceptedTime.getTime()) / 60000;
+
+        if (minutesSinceAccepted <= 3) {
+          // Within 3 min grace — free
+          charge = 0; reason = "Cancelled within 3 minute grace period";
+        } else if (driverArrivedAt) {
+          // Driver already arrived — GHS 10
+          charge = 10; reason = "Driver had already arrived";
+        } else {
+          // After 3 mins, before arrival — GHS 5
+          charge = 5; reason = "Cancelled after 3 minute grace period";
+        }
+      }
+    }
+
+    await supabase.from("bookings").update({
+      status: "cancelled",
+      cancellation_charge: charge,
+      cancellation_reason: reason,
+    }).eq("id", bookingId);
+
+    if (charge > 0) {
+      await creditDriverWallet(charge, bookingId);
+      Alert.alert(
+        "Booking Cancelled",
+        `A cancellation fee of GHS ${charge} has been charged. This goes directly to the driver.`,
+        [{ text: "OK", onPress: () => { byClient ? go("clientHome") : go("driverHome"); } }]
+      );
+    } else {
+      Alert.alert("Booking Cancelled", "No charge applied.", [{ text: "OK", onPress: () => { byClient ? go("clientHome") : go("driverHome"); } }]);
+    }
+
+    if (byClient) fetchClientBookings();
+    else fetchDriverBookings();
+    stopWaitingTimer();
   };
 
   // ============================================================
@@ -717,7 +930,6 @@ export default function App() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") { Alert.alert("Permission needed"); return; }
     const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.images,
       quality: 0.7,
     });
     if (!r.canceled) setter(r.assets[0].uri);
@@ -816,9 +1028,130 @@ export default function App() {
     }
     setShowRatingModal(false);
     await rateDriver(pendingRatingBookingId!, selectedRating, ratingComment);
+    // Show tip modal after rating
+    setTipBookingId(pendingRatingBookingId);
+    setTipAmount(0);
+    setShowTipModal(true);
     setPendingRatingBookingId(null);
     setRatingComment("");
     setSelectedRating(0);
+  };
+
+  const submitTip = async () => {
+    if (tipAmount > 0 && tipBookingId) {
+      // Blueprint: 100% of tip goes to driver — platform takes nothing
+      const booking = clientBookings.find(b => b.id === tipBookingId);
+      const driverId = booking?.driver_id;
+      if (driverId) {
+        await supabase.from("bookings").update({ tip_amount: tipAmount }).eq("id", tipBookingId);
+        // Credit driver wallet with full tip
+        const { data: wallet } = await supabase.from("wallets").select("*").eq("user_id", driverId).maybeSingle();
+        if (wallet) {
+          await supabase.from("wallets").update({
+            balance: parseFloat((wallet.balance + tipAmount).toFixed(2)),
+            total_earned: parseFloat((wallet.total_earned + tipAmount).toFixed(2)),
+            last_updated: new Date().toISOString(),
+          }).eq("user_id", driverId);
+        }
+        Alert.alert("Tip Sent! 🙏", `GHS ${tipAmount} sent directly to your driver. 100% goes to them.`);
+      }
+    }
+    setShowTipModal(false);
+    setTipBookingId(null);
+    setTipAmount(0);
+    go("myBookings");
+  };
+
+  // ============================================================
+  // PROMO CODES AND REFERRAL SYSTEM
+  // ============================================================
+  const generateReferralCode = (name: string) => {
+    const clean = name.replace(/\s/g, "").toUpperCase().substring(0, 4);
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${clean}-${rand}`;
+  };
+
+  const applyPromoCode = async () => {
+    if (!promoCode.trim()) { setPromoError("Please enter a code."); return; }
+    const code = promoCode.trim().toUpperCase();
+    setPromoError("");
+
+    // Check founder code
+    if (code === "F0UN-D3R-LNK-X9Q2") {
+      setPromoApplied({ type: "founder", discount: 100, label: "Founder Code — 100% FREE ride!" });
+      return;
+    }
+
+    // Check staff code
+    if (code === "LUMINA-STAFF-2026") {
+      setPromoApplied({ type: "staff", discount: 50, label: "Staff Code — 50% discount applied!" });
+      return;
+    }
+
+    // Check if it's a referral code from another user
+    const { data: referrer } = await supabase
+      .from("profiles")
+      .select("id, full_name, referral_code")
+      .eq("referral_code", code)
+      .maybeSingle();
+
+    if (referrer) {
+      setPromoApplied({ type: "referral", discount: 25, label: `Referral code from ${referrer.full_name} — 25% off!`, referrerId: referrer.id });
+      return;
+    }
+
+    // Check promo_codes table
+    const { data: promo } = await supabase
+      .from("promo_codes")
+      .select("*")
+      .eq("code", code)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (promo) {
+      setPromoApplied({ type: promo.type, discount: promo.discount_percent, label: `${code} — ${promo.discount_percent}% discount applied!` });
+      return;
+    }
+
+    setPromoError("Invalid or expired code. Please try again.");
+  };
+
+  const removePromo = () => {
+    setPromoApplied(null);
+    setPromoCode("");
+    setPromoError("");
+  };
+
+  const calcDiscountedFare = (originalFare: number) => {
+    if (!promoApplied) return originalFare;
+    if (promoApplied.discount >= 100) return 0;
+    return parseFloat((originalFare * (1 - promoApplied.discount / 100)).toFixed(2));
+  };
+
+  const handleReferralReward = async (newUserId: string, referrerId: string) => {
+    // Give referrer GHS 5 credit after friend's first ride
+    const { data: referrerProfile } = await supabase.from("profiles").select("promo_credit").eq("id", referrerId).maybeSingle();
+    if (referrerProfile) {
+      await supabase.from("profiles").update({
+        promo_credit: (referrerProfile.promo_credit || 0) + 5,
+      }).eq("id", referrerId);
+    }
+  };
+
+  const checkAndApplyWelcomeDiscount = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (!u) return false;
+    const { data: profile } = await supabase.from("profiles").select("welcome_discount_used, first_ride_done").eq("id", u.id).maybeSingle();
+    if (profile && !profile.welcome_discount_used && !profile.first_ride_done) {
+      return true; // Eligible for welcome discount
+    }
+    return false;
+  };
+
+  const markWelcomeDiscountUsed = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (!u) return;
+    await supabase.from("profiles").update({ welcome_discount_used: true, first_ride_done: true }).eq("id", u.id);
   };
 
   const rateDriver = async (bookingId: string, stars: number, comment: string = "") => {
@@ -935,6 +1268,63 @@ export default function App() {
   // ============================================================
   // SCREENS
   // ============================================================
+  // TIP MODAL — appears after rating, 100% to driver
+  if (showTipModal) return (
+    <SafeAreaView style={s.safe}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+        <View style={{ backgroundColor: "#1a1a1a", borderRadius: 16, padding: 28, width: "100%", alignItems: "center" }}>
+          <Text style={{ fontSize: 44, marginBottom: 8 }}>{"💰"}</Text>
+          <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 4 }}>Leave a Tip?</Text>
+          <Text style={{ color: "#888", fontSize: 13, textAlign: "center", marginBottom: 8 }}>100% goes directly to your driver.</Text>
+          <Text style={{ color: "#555", fontSize: 11, textAlign: "center", marginBottom: 24 }}>Platform takes nothing from tips — ever.</Text>
+
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 20 }}>
+            {[2, 5, 10, 15, 20].map(amount => (
+              <TouchableOpacity
+                key={amount}
+                onPress={() => setTipAmount(tipAmount === amount ? 0 : amount)}
+                style={{
+                  backgroundColor: tipAmount === amount ? "#c9a84c" : "#1a2a1a",
+                  borderWidth: 1,
+                  borderColor: tipAmount === amount ? "#c9a84c" : "#4caf50",
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 18,
+                }}>
+                <Text style={{ color: tipAmount === amount ? "#000" : "#4caf50", fontWeight: "bold", fontSize: 15 }}>
+                  GHS {amount}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TextInput
+            style={[s.input, { width: "100%", textAlign: "center" }]}
+            placeholder="Or enter custom amount..."
+            placeholderTextColor="#555"
+            keyboardType="numeric"
+            value={tipAmount > 0 && ![2, 5, 10, 15, 20].includes(tipAmount) ? String(tipAmount) : ""}
+            onChangeText={(v) => setTipAmount(parseFloat(v) || 0)}
+          />
+
+          {tipAmount > 0 && (
+            <Text style={{ color: "#c9a84c", fontSize: 16, fontWeight: "bold", marginBottom: 12 }}>
+              Sending GHS {tipAmount} tip
+            </Text>
+          )}
+
+          <TouchableOpacity style={[s.btn, { width: "100%", marginTop: 4 }]} onPress={submitTip}>
+            <Text style={s.btnTxt}>{tipAmount > 0 ? `Send GHS ${tipAmount} Tip` : "Skip Tip"}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={{ marginTop: 14 }} onPress={() => { setShowTipModal(false); go("myBookings"); }}>
+            <Text style={{ color: "#555", fontSize: 13 }}>No thanks</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+
   // RATING MODAL — must be checked BEFORE screen renders so it takes priority
   if (showRatingModal) return (
     <SafeAreaView style={s.safe}>
@@ -1460,6 +1850,24 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
+        {waitingCharge > 0 && (
+          <View style={[s.card, { borderColor: "#f5a623", borderWidth: 1 }]}>
+            <Text style={{ color: "#f5a623", fontWeight: "bold", textAlign: "center" }}>{"⏱️"} Waiting Charge Active</Text>
+            <Text style={{ color: "#fff", fontSize: 24, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {waitingCharge}</Text>
+            <Text style={{ color: "#888", fontSize: 12, textAlign: "center" }}>GHS 1/min after 5 free minutes — auto-cancel at 15 mins</Text>
+          </View>
+        )}
+
+        {!driverArrivedAt ? (
+          <TouchableOpacity style={[s.btnGreen, { marginBottom: 8 }]} onPress={() => activeBookingId && startWaitingTimer(activeBookingId)}>
+            <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"📍"} I Have Arrived at Pickup</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={[s.card, { borderColor: "#4caf50", borderWidth: 1 }]}>
+            <Text style={{ color: "#4caf50", textAlign: "center", fontWeight: "bold" }}>{"✅"} Arrived — waiting for client</Text>
+          </View>
+        )}
+
         <TouchableOpacity style={s.btn} onPress={completeRide}>
           <Text style={s.btnTxt}>{"✅"} Mark Ride Complete</Text>
         </TouchableOpacity>
@@ -1578,9 +1986,31 @@ export default function App() {
         ))}
 
         <Text style={s.sectionTitle}>MY ACCOUNT</Text>
+        {promoCredit > 0 && (
+          <View style={[s.card, { borderColor: "#c9a84c", borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+            <View>
+              <Text style={s.cardTitle}>{"🎁"} Promo Credit</Text>
+              <Text style={s.cardSub}>Applied automatically on your next ride</Text>
+            </View>
+            <Text style={{ color: "#c9a84c", fontSize: 20, fontWeight: "bold" }}>GHS {promoCredit}</Text>
+          </View>
+        )}
         <TouchableOpacity style={s.card} onPress={() => go("myBookings")}>
           <Text style={s.cardTitle}>{"📋"} My Bookings</Text>
           <Text style={s.cardSub}>View all your rides and orders</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.card, { borderColor: "#c9a84c", borderWidth: 1 }]}
+          onPress={() => {
+            const code = user?.referralCode || "Not available";
+            Alert.alert(
+              "🎁 Your Referral Code",
+              `Share your code and earn GHS 5 when a friend completes their first ride!\n\nYour code: ${code}\n\nYour friend gets 25% off their first ride too!`
+            );
+          }}>
+          <Text style={s.cardTitle}>{"🎁"} Refer a Friend</Text>
+          <Text style={{ color: "#c9a84c", fontSize: 13, fontWeight: "bold" }}>{user?.referralCode || "Loading..."}</Text>
+          <Text style={s.cardSub}>Earn GHS 5 when your friend completes their first ride</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -1651,7 +2081,16 @@ export default function App() {
             <Text style={{ color: "#4caf50", fontWeight: "bold", fontSize: 16, textAlign: "center" }}>Estimated Fare</Text>
             <Text style={{ color: "#fff", fontSize: 32, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {estFare}</Text>
             <Text style={{ color: "#888", textAlign: "center", marginTop: 4 }}>{estKm} km</Text>
-            <Text style={{ color: "#555", textAlign: "center", fontSize: 12 }}>{getSurgeLabel(driverBookings.filter(b => b.status === "pending").length).label}</Text>
+            <View style={{ flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 6 }}>
+              <Text style={{ color: getSurgeLabel(driverBookings.filter(b => b.status === "pending").length).color, fontSize: 11, fontWeight: "bold" }}>
+                {getSurgeLabel(driverBookings.filter(b => b.status === "pending").length).label}
+              </Text>
+              {getNightMultiplier().multiplier > 1.0 && (
+                <Text style={{ color: getNightMultiplier().color, fontSize: 11, fontWeight: "bold" }}>
+                  • {getNightMultiplier().label}
+                </Text>
+              )}
+            </View>
           </View>
         )}
 
@@ -1668,8 +2107,45 @@ export default function App() {
           ))}
         </View>
 
+        <Text style={s.sectionTitle}>PROMO CODE</Text>
+        {!promoApplied ? (
+          <>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 4 }}>
+              <TextInput
+                style={[s.input, { flex: 1, marginBottom: 0 }]}
+                placeholder="Enter promo or referral code..."
+                placeholderTextColor="#555"
+                value={promoCode}
+                onChangeText={t => { setPromoCode(t.toUpperCase()); setPromoError(""); }}
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={applyPromoCode}>
+                <Text style={s.btnTxt}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+            {promoError ? <Text style={{ color: "#f44336", fontSize: 12, marginBottom: 8 }}>{promoError}</Text> : null}
+          </>
+        ) : (
+          <View style={{ backgroundColor: "#1a3a1a", borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#4caf50", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View>
+              <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"✅"} Promo Applied!</Text>
+              <Text style={{ color: "#888", fontSize: 12 }}>{promoApplied.label}</Text>
+              {estFare && promoApplied.discount > 0 && (
+                <Text style={{ color: "#c9a84c", fontWeight: "bold", marginTop: 4 }}>
+                  {promoApplied.discount >= 100 ? "FREE RIDE" : `GHS ${calcDiscountedFare(estFare)} (was GHS ${estFare})`}
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity onPress={removePromo}>
+              <Text style={{ color: "#f44336", fontSize: 13 }}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={submitRide}>
-          <Text style={s.btnTxt}>{"🚗"} Confirm Booking</Text>
+          <Text style={s.btnTxt}>
+            {"🚗"} {promoApplied?.discount >= 100 ? "Book FREE Ride" : estFare && promoApplied ? `Book — GHS ${calcDiscountedFare(estFare)}` : "Confirm Booking"}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -1737,6 +2213,22 @@ export default function App() {
               {b.status === "accepted" && (
                 <TouchableOpacity style={[s.btnGreen, { marginTop: 8 }]} onPress={() => { setActiveBookingId(b.id); go("trackRide"); }}>
                   <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"📍"} Track Driver Live</Text>
+                </TouchableOpacity>
+              )}
+              {(b.status === "pending" || b.status === "accepted") && (
+                <TouchableOpacity
+                  style={[s.btnRed, { marginTop: 6 }]}
+                  onPress={() => Alert.alert(
+                    "Cancel Booking?",
+                    b.status === "pending"
+                      ? "No charge — driver hasn't accepted yet."
+                      : "A cancellation fee may apply per our policy.",
+                    [
+                      { text: "Keep Booking", style: "cancel" },
+                      { text: "Cancel Ride", style: "destructive", onPress: () => cancelBooking(b.id, true) },
+                    ]
+                  )}>
+                  <Text style={{ color: "#f44336", fontWeight: "bold" }}>{"✕"} Cancel Booking</Text>
                 </TouchableOpacity>
               )}
               {b.status === "completed" && !b.rated && (
