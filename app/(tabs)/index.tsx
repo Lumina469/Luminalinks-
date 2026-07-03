@@ -603,6 +603,14 @@ export default function App() {
       await handleReferralReward(booking.id, promoApplied.referrerId);
     }
 
+    // Increment uses_count for admin-generated promo codes
+    if (promoApplied?.promoId) {
+      const { data: promo } = await supabase.from("promo_codes").select("uses_count").eq("id", promoApplied.promoId).maybeSingle();
+      if (promo) {
+        await supabase.from("promo_codes").update({ uses_count: (promo.uses_count || 0) + 1 }).eq("id", promoApplied.promoId);
+      }
+    }
+
     const fareLabel = promoApplied?.discount >= 100 ? "FREE RIDE" : `GHS ${fare}`;
     Alert.alert("Ride Booked! 🚗", `Driver is being assigned. Fare: ${fareLabel}`, [{ text: "OK", onPress: () => go("myBookings") }]);
     setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null);
@@ -1100,7 +1108,7 @@ export default function App() {
       return;
     }
 
-    // Check promo_codes table
+    // Check promo_codes table (admin-generated codes)
     const { data: promo } = await supabase
       .from("promo_codes")
       .select("*")
@@ -1109,7 +1117,20 @@ export default function App() {
       .maybeSingle();
 
     if (promo) {
-      setPromoApplied({ type: promo.type, discount: promo.discount_percent, label: `${code} — ${promo.discount_percent}% discount applied!` });
+      // Check expiry
+      if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
+        setPromoError("This promo code has expired.");
+        return;
+      }
+      // Check max uses
+      if (promo.max_uses > 0 && promo.uses_count >= promo.max_uses) {
+        setPromoError("This promo code has reached its maximum uses.");
+        return;
+      }
+      const label = promo.description
+        ? `${code} — ${promo.description} (${promo.discount_percent}% off)`
+        : `${code} — ${promo.discount_percent}% discount applied!`;
+      setPromoApplied({ type: promo.type || "custom", discount: promo.discount_percent, label, promoId: promo.id });
       return;
     }
 

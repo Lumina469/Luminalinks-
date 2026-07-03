@@ -490,11 +490,18 @@
       <span class="nav-icon">↩️</span><span>Refunds</span>
       <span class="nav-badge" id="refund-badge">0</span>
     </button>
+    <button class="nav-item" onclick="showPage('kyc')">
+      <span class="nav-icon">🪪</span><span>KYC Review</span>
+      <span class="nav-badge" id="kyc-badge">0</span>
+    </button>
     <div class="nav-section">Finance</div>
     <button class="nav-item" onclick="showPage('earnings')">
       <span class="nav-icon">💰</span><span>Earnings</span>
     </button>
     <div class="nav-section">Platform</div>
+    <button class="nav-item" onclick="showPage('promos')">
+      <span class="nav-icon">🎁</span><span>Promo Codes</span>
+    </button>
     <button class="nav-item" onclick="showPage('notifications')">
       <span class="nav-icon">📣</span><span>Notifications</span>
     </button>
@@ -890,6 +897,88 @@
     </div>
   </div>
 
+  <!-- KYC REVIEW PAGE -->
+  <div class="page" id="page-kyc">
+    <div class="alert warn">
+      <span>⚠️</span>
+      <span>Review each driver's selfie against their ID photo manually. Smile Identity AI verification will be added post-launch. Approve or reject with one tap.</span>
+    </div>
+    <div class="search-bar">
+      <input class="search-input" id="kyc-search" placeholder="Search by name or email..." oninput="filterKYC()">
+      <select class="form-select" style="width:180px;" id="kyc-filter" onchange="filterKYC()">
+        <option value="pending">Pending Review</option>
+        <option value="verified">Already Approved</option>
+        <option value="">All Drivers</option>
+      </select>
+    </div>
+    <div id="kyc-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
+      <div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">Loading driver verifications...</div>
+    </div>
+  </div>
+
+  <!-- PROMO CODES PAGE -->
+  <div class="page" id="page-promos">
+    <div class="card">
+      <div class="card-title">Create New Promo Code</div>
+      <div class="card-sub">Codes are active immediately. Set expiry date to auto-deactivate.</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Promo Code</label>
+          <input class="form-input" id="new-promo-code" placeholder="e.g. LUMINA25 (auto-generates if empty)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Discount Percentage</label>
+          <input class="form-input" id="new-promo-discount" type="number" min="1" max="100" placeholder="e.g. 25">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Expiry Date (optional)</label>
+          <input class="form-input" id="new-promo-expiry" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Max Uses (optional, 0 = unlimited)</label>
+          <input class="form-input" id="new-promo-uses" type="number" min="0" placeholder="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description (shown to clients)</label>
+        <input class="form-input" id="new-promo-desc" placeholder="e.g. Special discount for Presec students">
+      </div>
+      <button class="btn btn-gold" onclick="createPromoCode()">🎁 Create Promo Code</button>
+    </div>
+
+    <div class="section-header" style="margin-top:8px;">
+      <div class="section-title">Active Promo Codes</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadPromoCodes()">↻ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Code</th><th>Discount</th><th>Type</th><th>Uses</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="promos-table">
+          <tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">Loading promo codes...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Built-in Codes (Blueprint)</div>
+      <div class="card-sub">These are hardcoded in the app and always active.</div>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);">F0UN-D3R-LNK-X9Q2</td>
+          <td style="padding:10px;color:var(--text-dim);">100% off — Founder only</td>
+          <td style="padding:10px;"><span class="badge green">Always Active</span></td>
+        </tr>
+        <tr>
+          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);">LUMINA-STAFF-2026</td>
+          <td style="padding:10px;color:var(--text-dim);">50% off — Staff only</td>
+          <td style="padding:10px;"><span class="badge green">Always Active</span></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
 </div><!-- end main -->
 
 <script>
@@ -954,10 +1043,17 @@ function showPage(name) {
   document.querySelectorAll('.nav-item').forEach(n => {
     if (n.getAttribute('onclick')?.includes(`'${name}'`)) n.classList.add('active');
   });
-  const titles = { dashboard: 'Dashboard', operations: 'Live Operations', bookings: 'All Bookings', drivers: 'Driver Management', clients: 'Client Management', refunds: 'Refund Management', earnings: 'My Earnings', notifications: 'Notifications', settings: 'Platform Settings' };
+  const titles = {
+    dashboard: 'Dashboard', operations: 'Live Operations', bookings: 'All Bookings',
+    drivers: 'Driver Management', clients: 'Client Management', refunds: 'Refund Management',
+    kyc: 'KYC — Driver Verification Review', promos: 'Promo Codes',
+    earnings: 'My Earnings', notifications: 'Notifications', settings: 'Platform Settings'
+  };
   document.getElementById('page-title').textContent = titles[name] || name;
   if (name === 'operations') renderLiveOps();
   if (name === 'earnings') calcEarnings();
+  if (name === 'kyc') loadKYCDrivers();
+  if (name === 'promos') loadPromoCodes();
 }
 
 // ── LOAD DATA ──
@@ -1345,6 +1441,201 @@ function statusBadge(s) {
   const map = { pending: 'gold', accepted: 'blue', completed: 'green', cancelled: 'red' };
   return `<span class="badge ${map[s] || 'grey'}">${s || '—'}</span>`;
 }
+
+// ── KYC REVIEW ──
+let allKYCDrivers = [];
+
+async function loadKYCDrivers() {
+  const data = await sb('profiles?select=*&role=eq.car_driver,profiles?select=*&role=eq.tuktuk_driver');
+  // Load all non-client profiles
+  const all = await sb('profiles?select=*&neq.role=client&order=created_at.desc');
+  allKYCDrivers = Array.isArray(all) ? all.filter(p => p.role !== 'client') : [];
+  renderKYCCards(allKYCDrivers);
+  // Update badge with pending count
+  const pending = allKYCDrivers.filter(d => !d.is_verified && !d.suspended).length;
+  document.getElementById('kyc-badge').textContent = pending;
+  if (pending === 0) document.getElementById('kyc-badge').style.display = 'none';
+}
+
+function renderKYCCards(drivers) {
+  const filter = document.getElementById('kyc-filter').value;
+  const q = document.getElementById('kyc-search').value.toLowerCase();
+  const filtered = drivers.filter(d => {
+    const matchFilter = !filter ||
+      (filter === 'pending' && !d.is_verified) ||
+      (filter === 'verified' && d.is_verified);
+    const matchQ = !q || [d.full_name, d.email, d.phone_number].some(v => v?.toLowerCase().includes(q));
+    return matchFilter && matchQ;
+  });
+
+  const container = document.getElementById('kyc-cards');
+  if (!filtered.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">No drivers found.</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(d => `
+    <div class="card" style="border-color:${d.is_verified ? 'var(--green)' : d.suspended ? 'var(--red)' : 'var(--border)'}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${d.full_name || '—'}</div>
+          <div style="color:var(--text-dim);font-size:12px;">${d.email || '—'}</div>
+          <div style="color:var(--text-dim);font-size:12px;">${d.phone_number || '—'}</div>
+        </div>
+        <span class="badge ${d.is_verified ? 'green' : d.suspended ? 'red' : 'gold'}">
+          ${d.is_verified ? '✓ Verified' : d.suspended ? 'Suspended' : 'Pending'}
+        </span>
+      </div>
+
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Role</div>
+      <div style="font-size:13px;margin-bottom:12px;">
+        ${d.role === 'car_driver' ? '🚗 Car Driver' :
+          d.role === 'tuktuk_driver' ? '🛺 Tuk Tuk' :
+          d.role === 'motorbike_rider' ? '🏍️ Motorbike' :
+          d.role === 'restaurant' ? '🍔 Restaurant' : d.role}
+      </div>
+
+      ${d.vehicle_make ? `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;">Vehicle</div>
+        <div style="font-size:13px;margin-bottom:12px;">${d.vehicle_make} ${d.vehicle_model || ''} — ${d.vehicle_plate || '—'}</div>
+      ` : ''}
+
+      ${d.road_worthy_expiry ? `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:700;text-transform:uppercase;">Expiry Dates</div>
+        <div style="font-size:12px;margin-bottom:12px;">
+          Road Worthy: ${d.road_worthy_expiry} &nbsp;|&nbsp; Registration: ${d.registration_expiry || '—'}
+        </div>
+      ` : ''}
+
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Document Photos</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;background:var(--bg);padding:8px;border-radius:6px;">
+        Photos stored in Supabase Storage under driver_docs bucket.<br>
+        Check: <span style="color:var(--gold);font-family:var(--font-mono);">driver_docs/${d.id}/</span>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        ${!d.is_verified && !d.suspended ? `
+          <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">✓ Approve</button>
+          <button class="btn btn-red btn-sm" onclick="rejectDriver('${d.id}','${d.full_name}')">✗ Reject</button>
+        ` : ''}
+        ${d.is_verified ? `
+          <button class="btn btn-ghost btn-sm" onclick="suspendDriver('${d.id}','${d.full_name}')">Suspend</button>
+        ` : ''}
+        ${d.suspended ? `
+          <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">Reinstate</button>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterKYC() { renderKYCCards(allKYCDrivers); }
+
+async function approveDriver(id, name) {
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_verified: true, suspended: false, suspension_reason: null }) });
+  alert(`✅ ${name} has been approved and can now receive rides.`);
+  await loadKYCDrivers();
+}
+
+async function rejectDriver(id, name) {
+  const reason = prompt(`Reason for rejecting ${name}:`);
+  if (!reason) return;
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_verified: false, suspended: true, suspension_reason: reason }) });
+  alert(`${name} has been rejected. Reason: ${reason}`);
+  await loadKYCDrivers();
+}
+
+async function suspendDriver(id, name) {
+  const reason = prompt(`Reason for suspending ${name}:`);
+  if (!reason) return;
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ suspended: true, suspension_reason: reason, is_verified: false }) });
+  alert(`${name} has been suspended.`);
+  await loadKYCDrivers();
+}
+
+// ── PROMO CODES ──
+let allPromos = [];
+
+async function loadPromoCodes() {
+  const data = await sb('promo_codes?select=*&order=created_at.desc');
+  allPromos = Array.isArray(data) ? data : [];
+  renderPromosTable();
+}
+
+function renderPromosTable() {
+  const tbody = document.getElementById('promos-table');
+  if (!allPromos.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">No custom promo codes yet. Create one above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = allPromos.map(p => `
+    <tr>
+      <td style="font-family:var(--font-mono);color:var(--gold);font-weight:700;">${p.code}</td>
+      <td style="font-family:var(--font-mono);">${p.discount_percent}%</td>
+      <td><span class="badge grey">${p.type || 'custom'}</span></td>
+      <td style="color:var(--text-dim);">${p.uses_count || 0} / ${p.max_uses || '∞'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${p.expires_at ? new Date(p.expires_at).toLocaleDateString() : 'Never'}</td>
+      <td>${p.is_active ? '<span class="badge green">Active</span>' : '<span class="badge red">Inactive</span>'}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="togglePromo('${p.id}',${p.is_active})">${p.is_active ? 'Deactivate' : 'Activate'}</button>
+        <button class="btn btn-red btn-sm" onclick="deletePromo('${p.id}','${p.code}')" style="margin-left:4px;">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function createPromoCode() {
+  const codeInput = document.getElementById('new-promo-code').value.trim().toUpperCase();
+  const discount = parseInt(document.getElementById('new-promo-discount').value);
+  const expiry = document.getElementById('new-promo-expiry').value;
+  const maxUses = parseInt(document.getElementById('new-promo-uses').value) || 0;
+  const desc = document.getElementById('new-promo-desc').value.trim();
+
+  if (!discount || discount < 1 || discount > 100) { alert('Please enter a valid discount between 1 and 100.'); return; }
+
+  // Auto-generate code if not provided
+  const code = codeInput || 'LUMINA' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+  const payload = {
+    code,
+    type: 'custom',
+    discount_percent: discount,
+    is_active: true,
+    ...(expiry && { expires_at: new Date(expiry).toISOString() }),
+    ...(maxUses > 0 && { max_uses: maxUses }),
+    ...(desc && { description: desc }),
+  };
+
+  const result = await sb('promo_codes', {
+    method: 'POST',
+    headers: { 'Prefer': 'return=representation' },
+    body: JSON.stringify(payload)
+  });
+
+  if (Array.isArray(result) && result[0]) {
+    alert(`✅ Promo code "${code}" created! ${discount}% off${expiry ? ` — expires ${new Date(expiry).toLocaleDateString()}` : ''}`);
+    document.getElementById('new-promo-code').value = '';
+    document.getElementById('new-promo-discount').value = '';
+    document.getElementById('new-promo-expiry').value = '';
+    document.getElementById('new-promo-uses').value = '';
+    document.getElementById('new-promo-desc').value = '';
+    await loadPromoCodes();
+  } else {
+    alert('Error creating promo code. The code may already exist.');
+  }
+}
+
+async function togglePromo(id, currentState) {
+  await sb(`promo_codes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !currentState }) });
+  await loadPromoCodes();
+}
+
+async function deletePromo(id, code) {
+  if (!confirm(`Delete promo code "${code}"? This cannot be undone.`)) return;
+  await sb(`promo_codes?id=eq.${id}`, { method: 'DELETE' });
+  await loadPromoCodes();
+}
+
 </script>
 </body>
 </html>
