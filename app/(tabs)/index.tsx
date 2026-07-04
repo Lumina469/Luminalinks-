@@ -99,6 +99,37 @@ const getSurgeLabel = (pendingCount: number) => {
 };
 
 // ============================================================
+// RIDE SCHEDULING — Blueprint: up to 7 days ahead
+// ============================================================
+const getNext7Days = () => {
+  const days = [];
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  for (let i = 0; i < 8; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    days.push({
+      key: d.toISOString().split("T")[0],
+      label: i === 0 ? "Today" : i === 1 ? "Tomorrow" : dayNames[d.getDay()],
+      date: `${d.getDate()}/${d.getMonth() + 1}`,
+    });
+  }
+  return days;
+};
+
+const getTimeSlots = (dayKey: string) => {
+  const slots = [];
+  const isToday = dayKey === new Date().toISOString().split("T")[0];
+  const currentHour = new Date().getHours();
+  for (let h = 5; h <= 22; h++) {
+    // For today, only show future slots (at least 1 hour ahead)
+    if (isToday && h <= currentHour + 1) continue;
+    const label = h < 12 ? `${h}:00 AM` : h === 12 ? "12:00 PM" : `${h - 12}:00 PM`;
+    slots.push({ key: `${String(h).padStart(2, "0")}:00`, label });
+  }
+  return slots;
+};
+
+// ============================================================
 // PUSH NOTIFICATIONS
 // ============================================================
 const sendPushNotification = async (pushToken: string, title: string, body: string) => {
@@ -127,6 +158,7 @@ export default function App() {
   const [authPhone, setAuthPhone] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authConfirm, setAuthConfirm] = useState("");
+  const [driverRefCode, setDriverRefCode] = useState("");
 
   // KYC / Verification
   const [idPhoto, setIdPhoto] = useState<string | null>(null);
@@ -149,6 +181,14 @@ export default function App() {
   const [location, setLocation] = useState<any>(null);
   const [pickupText, setPickupText] = useState("");
   const [dropoffText, setDropoffText] = useState("");
+  const [extraStops, setExtraStops] = useState<{ text: string; pin: any; suggestions: any[] }[]>([]);
+  const [hireHours, setHireHours] = useState(1);
+  const [hireVehicle, setHireVehicle] = useState("car");
+  const [hirePickup, setHirePickup] = useState("");
+  const [hireSugg, setHireSugg] = useState<any[]>([]);
+  const [pushNotifsEnabled, setPushNotifsEnabled] = useState(true);
+  const [rideUpdatesEnabled, setRideUpdatesEnabled] = useState(true);
+  const [promoNotifsEnabled, setPromoNotifsEnabled] = useState(true);
   const [pickupPin, setPickupPin] = useState<any>(null);
   const [dropoffPin, setDropoffPin] = useState<any>(null);
   const [pickupSugg, setPickupSugg] = useState<any[]>([]);
@@ -161,10 +201,14 @@ export default function App() {
   const [estFare, setEstFare] = useState<number | null>(null);
   const [estKm, setEstKm] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [scheduleRide, setScheduleRide] = useState(false);
+  const [scheduledDay, setScheduledDay] = useState<string | null>(null);
+  const [scheduledTime, setScheduledTime] = useState<string | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const [promoApplied, setPromoApplied] = useState<any>(null);
   const [promoError, setPromoError] = useState("");
   const [promoCredit, setPromoCredit] = useState(0);
+  const [favouriteDrivers, setFavouriteDrivers] = useState<any[]>([]);
   const [showPaystack, setShowPaystack] = useState(false);
   const [pendingPaymentBookingId, setPendingPaymentBookingId] = useState<string | null>(null);
   const [clientBookings, setClientBookings] = useState<any[]>([]);
@@ -302,6 +346,49 @@ export default function App() {
       setPromoCredit(profile.promo_credit || 0);
       setUser((prev: any) => ({ ...prev, referralCode: profile.referral_code, name: profile.full_name }));
     }
+    fetchFavouriteDrivers();
+  };
+
+  // ============================================================
+  // FAVOURITE DRIVERS — Blueprint: max 5 per client
+  // ============================================================
+  const fetchFavouriteDrivers = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
+    const { data } = await supabase
+      .from("favourite_drivers")
+      .select("*")
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false });
+    if (data) setFavouriteDrivers(data);
+  };
+
+  const addFavouriteDriver = async (driverId: string, driverName: string) => {
+    if (favouriteDrivers.length >= 5) {
+      Alert.alert("Limit Reached", "You can have a maximum of 5 favourite drivers. Remove one first to add a new one.");
+      return;
+    }
+    if (favouriteDrivers.some(f => f.driver_id === driverId)) {
+      Alert.alert("Already Added", `${driverName} is already in your favourites.`);
+      return;
+    }
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
+    const { error } = await supabase.from("favourite_drivers").insert({
+      client_id: clientId,
+      driver_id: driverId,
+      driver_name: driverName,
+    });
+    if (!error) {
+      Alert.alert("Added! ⭐", `${driverName} is now one of your favourite drivers.`);
+      fetchFavouriteDrivers();
+    }
+  };
+
+  const removeFavouriteDriver = async (favId: string, driverName: string) => {
+    await supabase.from("favourite_drivers").delete().eq("id", favId);
+    Alert.alert("Removed", `${driverName} removed from favourites.`);
+    fetchFavouriteDrivers();
   };
 
   const fetchClientBookings = async () => {
@@ -399,7 +486,9 @@ export default function App() {
         Alert.alert("Account Suspended", "Your account has been suspended. Please contact support.");
         return;
       }
-      u.verified ? go("driverHome") : go("verify");
+      if (u.verified) { go("driverHome"); }
+      else if (profile.kyc_submitted) { go("pending"); }
+      else { setAuthRole(role); setVerifyStep(1); go("verify"); }
     }
   };
 
@@ -409,6 +498,19 @@ export default function App() {
     const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPass });
     if (error) { Alert.alert("Error", error.message); return; }
     const refCode = generateReferralCode(authName);
+
+    // If a driver referral code was entered, look up who referred them
+    let referredByDriverId: string | null = null;
+    const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "home_service"].includes(authRole || "");
+    if (isDriverRole && driverRefCode.trim()) {
+      const { data: referrerDriver } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("referral_code", driverRefCode.trim().toUpperCase())
+        .maybeSingle();
+      if (referrerDriver) referredByDriverId = referrerDriver.id;
+    }
+
     await supabase.from("profiles").insert({
       id: data.user?.id,
       full_name: authName,
@@ -417,12 +519,12 @@ export default function App() {
       role: authRole,
       is_verified: authRole === "client",
       referral_code: refCode,
+      referred_by: referredByDriverId,
       promo_credit: 0,
       welcome_discount_used: false,
       first_ride_done: false,
     });
     setUser({ name: authName, email: authEmail, phone: authPhone, role: authRole, verified: authRole === "client" });
-    const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "home_service"].includes(authRole || "");
     if (!isDriverRole) { go("clientHome"); }
     else { setVerifyStep(1); go("verify"); }
   };
@@ -467,17 +569,117 @@ export default function App() {
     if (pickupPin) updateFare(pickupPin.latitude, pickupPin.longitude, p.lat, p.lon);
   };
 
+  // ============================================================
+  // MULTIPLE STOPS — Blueprint: max 3 stops per ride
+  // ============================================================
+  // ============================================================
+  // HOURLY VEHICLE HIRE — Blueprint: Car GHS 110/hr, TukTuk GHS 65/hr, Moto GHS 45/hr
+  // Payment AFTER hire period ends — never before
+  // ============================================================
+  const getHireRate = (vehicle: string) => {
+    if (vehicle === "tuktuk") return 65;
+    if (vehicle === "motorbike") return 45;
+    return 110;
+  };
+
+  const submitHire = async () => {
+    if (!hirePickup) { Alert.alert("Missing", "Please enter your pickup location"); return; }
+    const rate = getHireRate(hireVehicle);
+    const total = rate * hireHours;
+    const vehicleLabel = hireVehicle === "tuktuk" ? "Tuk Tuk" : hireVehicle === "motorbike" ? "Motorbike" : "Car";
+    Alert.alert(
+      "Confirm Hourly Hire",
+      `${vehicleLabel} for ${hireHours} hour${hireHours > 1 ? "s" : ""}\nRate: GHS ${rate}/hour\nTotal: GHS ${total}\n\nPayment is made AFTER the hire period ends — never before.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Confirm Hire", onPress: async () => {
+          const { data: { user: u } } = await supabase.auth.getUser();
+          const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
+          const { data } = await supabase.from("bookings").insert({
+            client_id: clientId,
+            client_name: authName || user?.name,
+            pickup: hirePickup,
+            dropoff: `HOURLY HIRE — ${hireHours}hr ${vehicleLabel}`,
+            service: hireVehicle,
+            price: total,
+            status: "pending",
+          }).select().single();
+          if (data) {
+            Alert.alert("Hire Booked! 🚗", `Your ${vehicleLabel} hire for ${hireHours} hour${hireHours > 1 ? "s" : ""} is confirmed. A driver will be assigned shortly.`, [{ text: "OK", onPress: () => go("myBookings") }]);
+            setHirePickup(""); setHireHours(1); setHireVehicle("car");
+            fetchClientBookings();
+          }
+        }},
+      ]
+    );
+  };
+
+  const addStop = () => {
+    if (extraStops.length >= 2) {
+      Alert.alert("Maximum Stops", "You can add up to 3 stops total (dropoff + 2 extra stops).");
+      return;
+    }
+    setExtraStops(prev => [...prev, { text: "", pin: null, suggestions: [] }]);
+  };
+
+  const removeStop = (index: number) => {
+    setExtraStops(prev => prev.filter((_, i) => i !== index));
+    setTimeout(recalcMultiStopFare, 100);
+  };
+
+  const stopTextChange = (index: number, text: string) => {
+    setExtraStops(prev => prev.map((s, i) => i === index ? { ...s, text } : s));
+    clearTimeout(ptRef.current);
+    ptRef.current = setTimeout(async () => {
+      const results = await searchPlaces(text);
+      setExtraStops(prev => prev.map((s, i) => i === index ? { ...s, suggestions: results } : s));
+    }, 600);
+  };
+
+  const selStop = (index: number, p: any) => {
+    setExtraStops(prev => prev.map((s, i) => i === index
+      ? { text: p.name, pin: { latitude: p.lat, longitude: p.lon }, suggestions: [] }
+      : s));
+    setTimeout(recalcMultiStopFare, 100);
+  };
+
+  // Recalculate fare across the full route: pickup -> dropoff -> stop1 -> stop2
+  const recalcMultiStopFare = () => {
+    if (!pickupPin || !dropoffPin) return;
+    let totalKm = getDist(pickupPin.latitude, pickupPin.longitude, dropoffPin.latitude, dropoffPin.longitude);
+    let lastPoint = dropoffPin;
+    for (const stop of extraStops) {
+      if (stop.pin) {
+        totalKm += getDist(lastPoint.latitude, lastPoint.longitude, stop.pin.latitude, stop.pin.longitude);
+        lastPoint = stop.pin;
+      }
+    }
+    setEstKm(parseFloat(totalKm.toFixed(2)));
+    const { fare } = calcFare(totalKm, selectedService, driverBookings.filter(b => b.status === "pending").length);
+    setEstFare(fare);
+  };
+
+  // Recalc fare whenever stops change
+  useEffect(() => {
+    if (extraStops.some(s => s.pin)) recalcMultiStopFare();
+  }, [extraStops.length, extraStops.map(s => s.pin ? 1 : 0).join("")]);
+
   const saveBookingToSupabase = async (pickup: string, dropoff: string, service: string, price: number) => {
     const { data: { user: u } } = await supabase.auth.getUser();
     const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
+    const scheduledFor = scheduleRide && scheduledDay && scheduledTime
+      ? new Date(`${scheduledDay}T${scheduledTime}:00`).toISOString()
+      : null;
+    const stopsText = extraStops.filter(s => s.text).map(s => s.text).join(" → ");
     const { data } = await supabase.from("bookings").insert({
       client_id: clientId,
       client_name: authName || user?.name,
       pickup,
-      dropoff,
+      dropoff: stopsText ? `${dropoff} → ${stopsText}` : dropoff,
       service,
       price,
-      status: "pending",
+      status: scheduledFor ? "scheduled" : "pending",
+      scheduled_for: scheduledFor,
     }).select().single();
     return data;
   };
@@ -487,17 +689,24 @@ export default function App() {
 
   const submitRide = () => {
     if (!pickupText || !dropoffText) { Alert.alert("Missing", "Please enter pickup and dropoff"); return; }
+    if (scheduleRide && (!scheduledDay || !scheduledTime)) {
+      Alert.alert("Missing", "Please select a day and time for your scheduled ride.");
+      return;
+    }
     const originalFare = estFare || 20;
     const finalFare = calcDiscountedFare(originalFare);
     const methodLabel = paymentMethod === "momo" ? "Mobile Money" : paymentMethod === "card" ? "Card" : "Cash";
     const timingNote = paymentMethod === "cash" ? "You will pay the driver directly." : "You will be charged automatically once the ride is complete.";
     const promoNote = promoApplied ? `\nPromo: ${promoApplied.label}` : "";
+    const scheduleNote = scheduleRide
+      ? `\nScheduled: ${getNext7Days().find(d => d.key === scheduledDay)?.label} at ${getTimeSlots(scheduledDay!).find(t => t.key === scheduledTime)?.label}`
+      : "";
     Alert.alert(
-      "Confirm Booking",
-      `Fare: GHS ${finalFare}${promoApplied && finalFare !== originalFare ? ` (was GHS ${originalFare})` : ""}\nPayment: ${methodLabel}${promoNote}\n\n${timingNote}`,
+      scheduleRide ? "Confirm Scheduled Ride" : "Confirm Booking",
+      `Fare: GHS ${finalFare}${promoApplied && finalFare !== originalFare ? ` (was GHS ${originalFare})` : ""}\nPayment: ${methodLabel}${promoNote}${scheduleNote}\n\n${timingNote}`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Book Ride", onPress: () => processBooking(finalFare) },
+        { text: scheduleRide ? "Schedule Ride" : "Book Ride", onPress: () => processBooking(finalFare) },
       ]
     );
   };
@@ -612,9 +821,15 @@ export default function App() {
     }
 
     const fareLabel = promoApplied?.discount >= 100 ? "FREE RIDE" : `GHS ${fare}`;
-    Alert.alert("Ride Booked! 🚗", `Driver is being assigned. Fare: ${fareLabel}`, [{ text: "OK", onPress: () => go("myBookings") }]);
+    const isScheduled = scheduleRide && scheduledDay && scheduledTime;
+    const successTitle = isScheduled ? "Ride Scheduled! 📅" : "Ride Booked! 🚗";
+    const successMsg = isScheduled
+      ? `Your ride is scheduled for ${getNext7Days().find(d => d.key === scheduledDay)?.label} at ${getTimeSlots(scheduledDay!).find(t => t.key === scheduledTime)?.label}. Fare: ${fareLabel}`
+      : `Driver is being assigned. Fare: ${fareLabel}`;
+    Alert.alert(successTitle, successMsg, [{ text: "OK", onPress: () => go("myBookings") }]);
     setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null);
     setEstFare(null); setEstKm(null); setPromoCode(""); setPromoApplied(null); setPromoError("");
+    setScheduleRide(false); setScheduledDay(null); setScheduledTime(null); setExtraStops([]);
   };
 
 
@@ -672,11 +887,63 @@ export default function App() {
           last_updated: new Date().toISOString(),
         });
       }
+
+      // Check driver referral bonus — Blueprint: GHS 15 to referrer after recruit's 10th ride
+      await checkDriverReferralBonus(driverId);
     }
 
     Alert.alert("Ride Complete!", "If the client chose MoMo or Card, they'll be prompted to pay now.", [{ text: "OK", onPress: () => go("driverHome") }]);
     setActiveBookingId(null);
     fetchDriverBookings();
+  };
+
+  // ============================================================
+  // DRIVER REFERRAL BONUS — Blueprint: GHS 15 after recruit's 10th completed ride
+  // ============================================================
+  const checkDriverReferralBonus = async (driverId: string) => {
+    // Count this driver's completed rides
+    const { data: completedRides } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("driver_id", driverId)
+      .eq("status", "completed");
+
+    const rideCount = completedRides?.length || 0;
+
+    // Only trigger exactly at the 10th completed ride
+    if (rideCount === 10) {
+      const { data: driverProfile } = await supabase
+        .from("profiles")
+        .select("referred_by, full_name")
+        .eq("id", driverId)
+        .maybeSingle();
+
+      if (driverProfile?.referred_by) {
+        const referrerId = driverProfile.referred_by;
+        const { data: referrerWallet } = await supabase
+          .from("wallets")
+          .select("*")
+          .eq("user_id", referrerId)
+          .maybeSingle();
+
+        if (referrerWallet) {
+          await supabase.from("wallets").update({
+            balance: parseFloat((referrerWallet.balance + 15).toFixed(2)),
+            total_earned: parseFloat((referrerWallet.total_earned + 15).toFixed(2)),
+            last_updated: new Date().toISOString(),
+          }).eq("user_id", referrerId);
+        } else {
+          await supabase.from("wallets").insert({
+            user_id: referrerId,
+            balance: 15,
+            total_earned: 15,
+            total_withdrawn: 0,
+            currency: "GHS",
+            last_updated: new Date().toISOString(),
+          });
+        }
+      }
+    }
   };
 
   // ============================================================
@@ -965,7 +1232,7 @@ export default function App() {
       if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
 
       await supabase.from("profiles").update({
-        is_verified: true, vehicle_make: vehMake, vehicle_model: vehModel,
+        is_verified: false, kyc_submitted: true, vehicle_make: vehMake, vehicle_model: vehModel,
         vehicle_year: vehYear, vehicle_plate: vehPlate,
         road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry,
       }).eq("id", providerId);
@@ -986,7 +1253,7 @@ export default function App() {
       if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
 
       await supabase.from("profiles").update({
-        is_verified: true, vehicle_make: vehMake, vehicle_plate: vehPlate,
+        is_verified: false, kyc_submitted: true, vehicle_make: vehMake, vehicle_plate: vehPlate,
         road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry,
       }).eq("id", providerId);
     }
@@ -997,7 +1264,7 @@ export default function App() {
       if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your bike"); return; }
       if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
 
-      await supabase.from("profiles").update({ is_verified: true }).eq("id", providerId);
+      await supabase.from("profiles").update({ is_verified: false, kyc_submitted: true }).eq("id", providerId);
     }
 
     // ── RESTAURANT/VENDOR: Ghana Card + Food Safety Cert + Restaurant Photo (menu handled separately)
@@ -1008,17 +1275,16 @@ export default function App() {
       if (!businessName) { Alert.alert("Missing", "Please enter your business name"); return; }
 
       await supabase.from("profiles").update({
-        is_verified: true, full_name: businessName,
+        is_verified: false, kyc_submitted: true, full_name: businessName,
       }).eq("id", providerId);
     }
 
-    // All checks passed — instant approval
-    setUser((prev: any) => ({ ...prev, verified: true }));
+    // Documents submitted — pending manual admin review
     const roleLabel = authRole === "car_driver" ? "Car Driver" : authRole === "tuktuk_driver" ? "Tuk Tuk Rider" : authRole === "motorbike_rider" ? "Motorbike Rider" : "Restaurant/Vendor";
     Alert.alert(
-      "Verified! ✅",
-      `Your documents passed all checks. You're approved as a ${roleLabel} on LuminaLinks!`,
-      [{ text: "Let's Go!", onPress: () => go("driverHome") }]
+      "Documents Submitted! 📋",
+      `Your ${roleLabel} application is under review. Expired documents are rejected automatically. You'll typically be approved within a few hours.`,
+      [{ text: "OK", onPress: () => go("pending") }]
     );
   };
 
@@ -1338,6 +1604,19 @@ export default function App() {
             <Text style={s.btnTxt}>{tipAmount > 0 ? `Send GHS ${tipAmount} Tip` : "Skip Tip"}</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={[s.btnOut, { width: "100%", marginTop: 10 }]}
+            onPress={() => {
+              const booking = clientBookings.find(b => b.id === tipBookingId);
+              if (booking?.driver_id) {
+                addFavouriteDriver(booking.driver_id, "This Driver");
+              } else {
+                Alert.alert("Not Available", "Driver info not found for this ride.");
+              }
+            }}>
+            <Text style={s.btnOutTxt}>{"⭐"} Add Driver to Favourites</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={{ marginTop: 14 }} onPress={() => { setShowTipModal(false); go("myBookings"); }}>
             <Text style={{ color: "#555", fontSize: 13 }}>No thanks</Text>
           </TouchableOpacity>
@@ -1473,6 +1752,20 @@ export default function App() {
         <TextInput style={s.input} placeholder="Password" placeholderTextColor="#555" value={authPass} onChangeText={setAuthPass} secureTextEntry />
         {authMode === "signup" && (
           <TextInput style={s.input} placeholder="Confirm Password" placeholderTextColor="#555" value={authConfirm} onChangeText={setAuthConfirm} secureTextEntry />
+        )}
+        {authMode === "signup" && ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "home_service"].includes(authRole || "") && (
+          <>
+            <Text style={s.sectionTitle}>DRIVER REFERRAL (OPTIONAL)</Text>
+            <TextInput
+              style={s.input}
+              placeholder="Referral code from another driver..."
+              placeholderTextColor="#555"
+              value={driverRefCode}
+              onChangeText={t => setDriverRefCode(t.toUpperCase())}
+              autoCapitalize="characters"
+            />
+            <Text style={{ color: "#555", fontSize: 11, marginTop: -8, marginBottom: 8 }}>If a fellow driver referred you, enter their code — they'll earn GHS 15 after your 10th ride.</Text>
+          </>
         )}
         <TouchableOpacity style={s.btn} onPress={authMode === "login" ? doLogin : doSignup}>
           <Text style={s.btnTxt}>{authMode === "login" ? "Log In" : "Create Account"}</Text>
@@ -1723,7 +2016,7 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // PENDING
+  // PENDING — under admin review
   if (screen === "pending") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
@@ -1731,10 +2024,25 @@ export default function App() {
         <TouchableOpacity onPress={logout}><Text style={s.navLink}>Log Out</Text></TouchableOpacity>
       </View>
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ fontSize: 40, marginBottom: 16 }}>{"📋"}</Text>
-        <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 8 }}>Verification Incomplete</Text>
-        <Text style={{ color: "#888", fontSize: 14, textAlign: "center", marginBottom: 24 }}>Complete your document upload to get verified instantly — no waiting required.</Text>
-        <TouchableOpacity style={s.btn} onPress={() => go("verify")}><Text style={s.btnTxt}>Complete Verification</Text></TouchableOpacity>
+        <Text style={{ fontSize: 40, marginBottom: 16 }}>{"⏳"}</Text>
+        <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 8 }}>Application Under Review</Text>
+        <Text style={{ color: "#888", fontSize: 14, textAlign: "center", marginBottom: 8 }}>Our team is reviewing your documents. Most applications are approved within a few hours.</Text>
+        <Text style={{ color: "#555", fontSize: 12, textAlign: "center", marginBottom: 24 }}>You'll get access automatically once approved.</Text>
+        <TouchableOpacity style={s.btn} onPress={async () => {
+          const { data: { user: u } } = await supabase.auth.getUser();
+          if (!u) return;
+          const { data: profile } = await supabase.from("profiles").select("is_verified, suspended, suspension_reason").eq("id", u.id).maybeSingle();
+          if (profile?.is_verified) {
+            setUser((prev: any) => ({ ...prev, verified: true }));
+            Alert.alert("Approved! ✅", "Welcome to LuminaLinks! You can start receiving rides now.", [{ text: "Let's Go!", onPress: () => go("driverHome") }]);
+          } else if (profile?.suspended) {
+            Alert.alert("Application Rejected", profile.suspension_reason || "Please contact support for details.");
+          } else {
+            Alert.alert("Still Under Review", "Your application hasn't been reviewed yet. Please check back soon.");
+          }
+        }}>
+          <Text style={s.btnTxt}>{"🔄"} Check Status</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -1744,11 +2052,25 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <Text style={s.navLogo}>LuminaLinks Driver</Text>
-        <TouchableOpacity onPress={logout}><Text style={s.navLink}>Log Out</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => go("driverProfile")}><Text style={s.navLink}>{"👤"} Profile</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>Welcome, {user?.name}!</Text>
-        <Text style={{ color: "#888", fontSize: 13, marginBottom: 16 }}>{"Keep 85% of every fare + 100% of tips"}</Text>
+        <Text style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>{"Keep 85% of every fare + 100% of tips"}</Text>
+
+        <WebView
+          style={{ width: "100%", height: 160, borderRadius: 12, marginBottom: 16 }}
+          pointerEvents="none"
+          source={{
+            html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+              var myLat=${location?.latitude || 6.6}, myLng=${location?.longitude || -0.9};
+              var map=L.map("map",{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false}).setView([myLat,myLng],15);
+              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+              var meIcon=L.divIcon({html:"🚗",iconSize:[30,30],className:"me-marker"});
+              L.marker([myLat,myLng],{icon:meIcon}).addTo(map);
+            </script></body></html>`
+          }}
+        />
 
         <View style={s.onlineRow}>
           <View>
@@ -1793,19 +2115,24 @@ export default function App() {
         {driverBookings.length === 0
           ? <Text style={{ color: "#888", textAlign: "center", marginTop: 40 }}>No orders yet. Waiting for clients...</Text>
           : driverBookings.map((b, i) => (
-            <View key={i} style={s.card}>
-              <Text style={s.cardTitle}>{"🚗"} Ride Request</Text>
+            <View key={i} style={[s.card, b.status === "scheduled" && { borderColor: "#2196f3", borderWidth: 1 }]}>
+              <Text style={s.cardTitle}>{b.status === "scheduled" ? "📅 Scheduled Ride" : "🚗 Ride Request"}</Text>
+              {b.scheduled_for && (
+                <Text style={{ color: "#2196f3", fontWeight: "bold", marginTop: 4 }}>
+                  {"🕐"} Pickup: {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </Text>
+              )}
               <Text style={{ color: "#888", marginTop: 4 }}>{"📍"} From: {b.pickup}</Text>
               <Text style={{ color: "#888" }}>{"🏁"} To: {b.dropoff}</Text>
               <Text style={{ color: "#c9a84c", fontWeight: "bold", marginTop: 6 }}>GHS {b.price}</Text>
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                <View style={[s.badge, { backgroundColor: b.status === "pending" ? "#2a2000" : b.status === "accepted" ? "#1a3a1a" : "#1a1a2a" }]}>
-                  <Text style={{ color: b.status === "pending" ? "#f5a623" : b.status === "accepted" ? "#4caf50" : "#888", fontSize: 12 }}>{b.status?.toUpperCase()}</Text>
+                <View style={[s.badge, { backgroundColor: b.status === "pending" ? "#2a2000" : b.status === "scheduled" ? "#0a1a2a" : b.status === "accepted" ? "#1a3a1a" : "#1a1a2a" }]}>
+                  <Text style={{ color: b.status === "pending" ? "#f5a623" : b.status === "scheduled" ? "#2196f3" : b.status === "accepted" ? "#4caf50" : "#888", fontSize: 12 }}>{b.status?.toUpperCase()}</Text>
                 </View>
               </View>
-              {b.status === "pending" && (
+              {(b.status === "pending" || b.status === "scheduled") && (
                 <TouchableOpacity style={[s.btnGreen, { marginTop: 8 }]} onPress={() => acceptOrder(b.id)}>
-                  <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"✅"} Accept Ride</Text>
+                  <Text style={{ color: "#4caf50", fontWeight: "bold" }}>{"✅"} Accept {b.status === "scheduled" ? "Scheduled " : ""}Ride</Text>
                 </TouchableOpacity>
               )}
               {b.status === "accepted" && (
@@ -1946,27 +2273,60 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("driverHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-        <Text style={s.navLogo}>My Profile</Text>
+        <Text style={s.navLogo}>Profile & Settings</Text>
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={s.card}>
+          <Text style={{ fontSize: 40, marginBottom: 8 }}>{"👤"}</Text>
           <Text style={s.cardTitle}>{user?.name}</Text>
           <Text style={s.cardSub}>{user?.email}</Text>
           <Text style={s.cardSub}>{user?.phone}</Text>
-          <View style={[s.badge, { backgroundColor: "#1a3a1a" }]}>
+          <View style={[s.badge, { backgroundColor: "#1a3a1a", marginTop: 8 }]}>
             <Text style={{ color: "#4caf50", fontSize: 12 }}>{"✅"} Verified Driver</Text>
           </View>
           <View style={[s.badge, { backgroundColor: "#1a2a1a", marginTop: 6 }]}>
             <Text style={{ color: "#c9a84c", fontSize: 12 }}>{"⭐"} {driverRating} average rating</Text>
           </View>
         </View>
-        <Text style={s.sectionTitle}>COMMISSION RATE</Text>
+
+        <Text style={s.sectionTitle}>EARNINGS</Text>
+        <TouchableOpacity style={s.card} onPress={() => go("driverEarnings")}>
+          <Text style={s.cardTitle}>{"💰"} My Earnings</Text>
+          <Text style={s.cardSub}>View balance and withdraw anytime</Text>
+        </TouchableOpacity>
         <View style={s.card}>
           <Text style={{ color: "#fff" }}>Platform takes: <Text style={{ color: "#c9a84c", fontWeight: "bold" }}>15%</Text></Text>
           <Text style={{ color: "#fff" }}>You keep: <Text style={{ color: "#4caf50", fontWeight: "bold" }}>85% + 100% of tips</Text></Text>
         </View>
-        <TouchableOpacity style={s.btnOut} onPress={logout}><Text style={s.btnOutTxt}>Log Out</Text></TouchableOpacity>
+
+        <Text style={s.sectionTitle}>NOTIFICATIONS</Text>
+        <View style={s.card}>
+          <View style={s.onlineRow}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>Push Notifications</Text>
+            <Switch value={pushNotifsEnabled} onValueChange={setPushNotifsEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+          <View style={[s.onlineRow, { marginTop: 8 }]}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>New Ride Alerts</Text>
+            <Switch value={rideUpdatesEnabled} onValueChange={setRideUpdatesEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+          <View style={[s.onlineRow, { marginTop: 8 }]}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>Promos & Incentives</Text>
+            <Switch value={promoNotifsEnabled} onValueChange={setPromoNotifsEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+        </View>
+
+        <Text style={s.sectionTitle}>SUPPORT</Text>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("Contact Support", "Email: support@luminalinks.com\nPhone: Coming soon")}>
+          <Text style={s.cardTitle}>{"💬"} Help & Support</Text>
+          <Text style={s.cardSub}>Get help with a ride, payment, or account issue</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("About LuminaLinks", "Ghana's own super app for rides, delivery, food and home services.\n\nBuilt in Asamankese, Eastern Region.")}>
+          <Text style={s.cardTitle}>{"ℹ️"} About LuminaLinks</Text>
+          <Text style={s.cardSub}>Version 1.0.0</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={logout}><Text style={s.btnOutTxt}>Log Out</Text></TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1976,17 +2336,32 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <Text style={s.navLogo}>LuminaLinks</Text>
-        <TouchableOpacity onPress={logout}><Text style={s.navLink}>Log Out</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => go("clientProfile")}><Text style={s.navLink}>{"👤"} Profile</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>Hello, {user?.name}!</Text>
-        <Text style={{ color: "#888", fontSize: 13, marginBottom: 20 }}>Where are you going today?</Text>
+        <Text style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>Where are you going today?</Text>
+
+        <WebView
+          style={{ width: "100%", height: 180, borderRadius: 12, marginBottom: 20 }}
+          pointerEvents="none"
+          source={{
+            html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+              var myLat=${location?.latitude || 6.6}, myLng=${location?.longitude || -0.9};
+              var map=L.map("map",{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false}).setView([myLat,myLng],15);
+              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+              var meIcon=L.divIcon({html:"📍",iconSize:[30,30],className:"me-marker"});
+              L.marker([myLat,myLng],{icon:meIcon}).addTo(map);
+            </script></body></html>`
+          }}
+        />
 
         <Text style={s.sectionTitle}>SERVICES</Text>
         {[
           ["🚗", "Car Ride", "Point-to-point rides", "car"],
           ["🛺", "Tuk Tuk", "Affordable short trips", "tuktuk"],
           ["🏍️", "Motorbike Delivery", "Fast parcel delivery", "motorbike"],
+          ["⏱️", "Hourly Hire", "Book a vehicle by the hour", "hire"],
           ["🍔", "Food Delivery", "Restaurants and street food", "food"],
         ].map(([icon, title, sub, type]) => (
           <TouchableOpacity
@@ -1994,6 +2369,7 @@ export default function App() {
             style={[s.card, { flexDirection: "row", alignItems: "center" }]}
             onPress={() => {
               if (type === "food") { Alert.alert("Coming Soon!", "Food delivery launching soon!"); return; }
+              if (type === "hire") { go("hourlyHire"); return; }
               setSelectedService(type as string);
               go("bookRide");
             }}>
@@ -2020,18 +2396,9 @@ export default function App() {
           <Text style={s.cardTitle}>{"📋"} My Bookings</Text>
           <Text style={s.cardSub}>View all your rides and orders</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.card, { borderColor: "#c9a84c", borderWidth: 1 }]}
-          onPress={() => {
-            const code = user?.referralCode || "Not available";
-            Alert.alert(
-              "🎁 Your Referral Code",
-              `Share your code and earn GHS 5 when a friend completes their first ride!\n\nYour code: ${code}\n\nYour friend gets 25% off their first ride too!`
-            );
-          }}>
-          <Text style={s.cardTitle}>{"🎁"} Refer a Friend</Text>
-          <Text style={{ color: "#c9a84c", fontSize: 13, fontWeight: "bold" }}>{user?.referralCode || "Loading..."}</Text>
-          <Text style={s.cardSub}>Earn GHS 5 when your friend completes their first ride</Text>
+        <TouchableOpacity style={s.card} onPress={() => go("clientProfile")}>
+          <Text style={s.cardTitle}>{"👤"} Profile & Settings</Text>
+          <Text style={s.cardSub}>Referrals, favourites, payment, notifications</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -2069,6 +2436,42 @@ export default function App() {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+
+        {extraStops.map((stop, index) => (
+          <View key={index}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={s.sectionTitle}>STOP {index + 2}</Text>
+              <TouchableOpacity onPress={() => removeStop(index)}>
+                <Text style={{ color: "#f44336", fontSize: 13 }}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={s.input}
+              placeholder={`Search stop ${index + 2} address...`}
+              placeholderTextColor="#555"
+              value={stop.text}
+              onChangeText={(t) => stopTextChange(index, t)}
+            />
+            {stop.suggestions.length > 0 && (
+              <View style={s.suggestBox}>
+                {stop.suggestions.map((p: any, i: number) => (
+                  <TouchableOpacity key={i} style={s.suggestItem} onPress={() => selStop(index, p)}>
+                    <Text style={s.suggestTxt}>{"📍"} {p.name.length > 60 ? p.name.substring(0, 60) + "..." : p.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+
+        {extraStops.length < 2 && (
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12, paddingVertical: 6 }}
+            onPress={addStop}>
+            <Text style={{ color: "#c9a84c", fontSize: 20 }}>{"+"}</Text>
+            <Text style={{ color: "#c9a84c", fontSize: 14, fontWeight: "600" }}>Add Stop ({extraStops.length + 1}/3 destinations)</Text>
+          </TouchableOpacity>
         )}
 
         <Text style={s.sectionTitle}>OR PIN DROPOFF ON MAP</Text>
@@ -2113,6 +2516,66 @@ export default function App() {
               )}
             </View>
           </View>
+        )}
+
+        <Text style={s.sectionTitle}>WHEN DO YOU NEED THE RIDE?</Text>
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+          <TouchableOpacity
+            onPress={() => { setScheduleRide(false); setScheduledDay(null); setScheduledTime(null); }}
+            style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: !scheduleRide ? "#c9a84c" : "#1a1a1a", borderWidth: 1, borderColor: !scheduleRide ? "#c9a84c" : "#333", alignItems: "center" }}>
+            <Text style={{ fontSize: 18 }}>{"⚡"}</Text>
+            <Text style={{ color: !scheduleRide ? "#000" : "#fff", fontSize: 12, fontWeight: !scheduleRide ? "bold" : "normal" }}>Ride Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setScheduleRide(true)}
+            style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: scheduleRide ? "#c9a84c" : "#1a1a1a", borderWidth: 1, borderColor: scheduleRide ? "#c9a84c" : "#333", alignItems: "center" }}>
+            <Text style={{ fontSize: 18 }}>{"📅"}</Text>
+            <Text style={{ color: scheduleRide ? "#000" : "#fff", fontSize: 12, fontWeight: scheduleRide ? "bold" : "normal" }}>Schedule Later</Text>
+          </TouchableOpacity>
+        </View>
+
+        {scheduleRide && (
+          <>
+            <Text style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Select day (up to 7 days ahead):</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {getNext7Days().map(d => (
+                  <TouchableOpacity
+                    key={d.key}
+                    onPress={() => { setScheduledDay(d.key); setScheduledTime(null); }}
+                    style={{ paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: scheduledDay === d.key ? "#c9a84c" : "#1a1a1a", borderWidth: 1, borderColor: scheduledDay === d.key ? "#c9a84c" : "#333", alignItems: "center" }}>
+                    <Text style={{ color: scheduledDay === d.key ? "#000" : "#fff", fontSize: 13, fontWeight: "bold" }}>{d.label}</Text>
+                    <Text style={{ color: scheduledDay === d.key ? "#000" : "#888", fontSize: 11 }}>{d.date}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+
+            {scheduledDay && (
+              <>
+                <Text style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Select pickup time:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {getTimeSlots(scheduledDay).map(t => (
+                      <TouchableOpacity
+                        key={t.key}
+                        onPress={() => setScheduledTime(t.key)}
+                        style={{ paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: scheduledTime === t.key ? "#4caf50" : "#1a1a1a", borderWidth: 1, borderColor: scheduledTime === t.key ? "#4caf50" : "#333" }}>
+                        <Text style={{ color: scheduledTime === t.key ? "#000" : "#fff", fontSize: 13, fontWeight: scheduledTime === t.key ? "bold" : "normal" }}>{t.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+                {scheduledTime && (
+                  <View style={{ backgroundColor: "#1a2a1a", borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#4caf50" }}>
+                    <Text style={{ color: "#4caf50", fontWeight: "bold", textAlign: "center" }}>
+                      {"📅"} Scheduled for {getNext7Days().find(d => d.key === scheduledDay)?.label} at {getTimeSlots(scheduledDay).find(t => t.key === scheduledTime)?.label}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+          </>
         )}
 
         <Text style={s.sectionTitle}>PAYMENT METHOD</Text>
@@ -2204,6 +2667,185 @@ export default function App() {
     </SafeAreaView>
   );
 
+  // CLIENT PROFILE / SETTINGS
+  if (screen === "clientProfile") return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <Text style={s.navLogo}>Profile & Settings</Text>
+        <View />
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <View style={s.card}>
+          <Text style={{ fontSize: 40, marginBottom: 8 }}>{"👤"}</Text>
+          <Text style={s.cardTitle}>{user?.name}</Text>
+          <Text style={s.cardSub}>{user?.email}</Text>
+          <Text style={s.cardSub}>{user?.phone}</Text>
+          <View style={[s.badge, { backgroundColor: "#1a3a1a", marginTop: 8 }]}>
+            <Text style={{ color: "#4caf50", fontSize: 12 }}>{"✅"} Verified Client</Text>
+          </View>
+        </View>
+
+        <Text style={s.sectionTitle}>ACCOUNT</Text>
+        <TouchableOpacity style={s.card} onPress={() => go("myBookings")}>
+          <Text style={s.cardTitle}>{"📋"} My Bookings</Text>
+          <Text style={s.cardSub}>View all your rides and orders</Text>
+        </TouchableOpacity>
+        {favouriteDrivers.length > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardTitle}>{"⭐"} Favourite Drivers ({favouriteDrivers.length}/5)</Text>
+            {favouriteDrivers.map((f, i) => (
+              <View key={i} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                <Text style={{ color: "#fff" }}>{f.driver_name || "Driver"}</Text>
+                <TouchableOpacity onPress={() => removeFavouriteDriver(f.id, f.driver_name || "Driver")}>
+                  <Text style={{ color: "#f44336", fontSize: 12 }}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+        <View style={[s.card, { borderColor: "#c9a84c", borderWidth: 1 }]}>
+          <Text style={s.cardTitle}>{"🎁"} Referral Code</Text>
+          <Text style={{ color: "#c9a84c", fontSize: 16, fontWeight: "bold", marginTop: 4 }}>{user?.referralCode || "Loading..."}</Text>
+          <Text style={s.cardSub}>Share this — earn GHS 5 per friend who completes their first ride</Text>
+          {promoCredit > 0 && (
+            <Text style={{ color: "#4caf50", fontWeight: "bold", marginTop: 8 }}>Current credit: GHS {promoCredit}</Text>
+          )}
+        </View>
+
+        <Text style={s.sectionTitle}>PAYMENT PREFERENCE</Text>
+        <View style={s.card}>
+          <Text style={s.cardSub}>Default payment method for new bookings</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+            {[["cash", "💵", "Cash"], ["momo", "📱", "MoMo"], ["card", "💳", "Card"]].map(([val, icon, label]) => (
+              <TouchableOpacity
+                key={val}
+                onPress={() => setPaymentMethod(val)}
+                style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: paymentMethod === val ? "#c9a84c" : "#1a1a1a", borderWidth: 1, borderColor: paymentMethod === val ? "#c9a84c" : "#333", alignItems: "center" }}>
+                <Text style={{ fontSize: 18 }}>{icon}</Text>
+                <Text style={{ color: paymentMethod === val ? "#000" : "#fff", fontSize: 11, fontWeight: paymentMethod === val ? "bold" : "normal" }}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        <Text style={s.sectionTitle}>NOTIFICATIONS</Text>
+        <View style={s.card}>
+          <View style={s.onlineRow}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>Push Notifications</Text>
+            <Switch value={pushNotifsEnabled} onValueChange={setPushNotifsEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+          <View style={[s.onlineRow, { marginTop: 8 }]}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>Ride Status Updates</Text>
+            <Switch value={rideUpdatesEnabled} onValueChange={setRideUpdatesEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+          <View style={[s.onlineRow, { marginTop: 8 }]}>
+            <Text style={{ color: "#fff", fontSize: 13 }}>Promos & Offers</Text>
+            <Switch value={promoNotifsEnabled} onValueChange={setPromoNotifsEnabled} trackColor={{ false: "#333", true: "#4caf50" }} thumbColor="#fff" />
+          </View>
+        </View>
+
+        <Text style={s.sectionTitle}>SUPPORT</Text>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("Contact Support", "Email: support@luminalinks.com\nPhone: Coming soon")}>
+          <Text style={s.cardTitle}>{"💬"} Help & Support</Text>
+          <Text style={s.cardSub}>Get help with a ride, payment, or account issue</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("About LuminaLinks", "Ghana's own super app for rides, delivery, food and home services.\n\nBuilt in Asamankese, Eastern Region.")}>
+          <Text style={s.cardTitle}>{"ℹ️"} About LuminaLinks</Text>
+          <Text style={s.cardSub}>Version 1.0.0</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={logout}>
+          <Text style={s.btnOutTxt}>Log Out</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+
+  // HOURLY HIRE
+  if (screen === "hourlyHire") return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <Text style={s.navLogo}>Hourly Hire</Text>
+        <View />
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <Text style={{ color: "#888", fontSize: 13, marginBottom: 16 }}>Book a vehicle by the hour for errands, waiting time, or multiple stops. Payment is made after the hire period ends.</Text>
+
+        <Text style={s.sectionTitle}>SELECT VEHICLE</Text>
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+          {[
+            ["car", "🚗", "Car", 110],
+            ["tuktuk", "🛺", "Tuk Tuk", 65],
+            ["motorbike", "🏍️", "Motorbike", 45],
+          ].map(([val, icon, label, rate]) => (
+            <TouchableOpacity
+              key={val as string}
+              onPress={() => setHireVehicle(val as string)}
+              style={{ flex: 1, padding: 14, borderRadius: 10, backgroundColor: hireVehicle === val ? "#c9a84c" : "#1a1a1a", borderWidth: 1, borderColor: hireVehicle === val ? "#c9a84c" : "#333", alignItems: "center" }}>
+              <Text style={{ fontSize: 24 }}>{icon}</Text>
+              <Text style={{ color: hireVehicle === val ? "#000" : "#fff", fontWeight: "bold", marginTop: 4 }}>{label}</Text>
+              <Text style={{ color: hireVehicle === val ? "#000" : "#888", fontSize: 12 }}>GHS {rate}/hr</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={s.sectionTitle}>PICKUP LOCATION</Text>
+        <TextInput
+          style={s.input}
+          placeholder="Where should the driver meet you?"
+          placeholderTextColor="#555"
+          value={hirePickup}
+          onChangeText={async (t) => {
+            setHirePickup(t);
+            if (t.length >= 3) setHireSugg(await searchPlaces(t));
+            else setHireSugg([]);
+          }}
+        />
+        {hireSugg.length > 0 && (
+          <View style={s.suggestBox}>
+            {hireSugg.map((p, i) => (
+              <TouchableOpacity key={i} style={s.suggestItem} onPress={() => { setHirePickup(p.name); setHireSugg([]); }}>
+                <Text style={s.suggestTxt}>{"📍"} {p.name.length > 60 ? p.name.substring(0, 60) + "..." : p.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        <Text style={s.sectionTitle}>NUMBER OF HOURS</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 16 }}>
+          <TouchableOpacity
+            onPress={() => setHireHours(Math.max(1, hireHours - 1))}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#333", alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>{"−"}</Text>
+          </TouchableOpacity>
+          <Text style={{ color: "#c9a84c", fontSize: 32, fontWeight: "bold", minWidth: 60, textAlign: "center" }}>{hireHours}</Text>
+          <TouchableOpacity
+            onPress={() => setHireHours(Math.min(12, hireHours + 1))}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a1a1a", borderWidth: 1, borderColor: "#333", alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>{"+"}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={{ color: "#888", textAlign: "center", fontSize: 12, marginBottom: 16 }}>hour{hireHours > 1 ? "s" : ""} (max 12 hours per booking)</Text>
+
+        <View style={s.fareBox}>
+          <Text style={{ color: "#4caf50", fontWeight: "bold", fontSize: 16, textAlign: "center" }}>Total Estimated Cost</Text>
+          <Text style={{ color: "#fff", fontSize: 32, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {getHireRate(hireVehicle) * hireHours}</Text>
+          <Text style={{ color: "#888", textAlign: "center", marginTop: 4 }}>GHS {getHireRate(hireVehicle)}/hour × {hireHours} hour{hireHours > 1 ? "s" : ""}</Text>
+        </View>
+
+        <View style={{ backgroundColor: "#1a2a1a", borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: "#4caf50" }}>
+          <Text style={{ color: "#4caf50", fontSize: 12, textAlign: "center" }}>{"💵"} Payment is collected after your hire period ends — never before.</Text>
+        </View>
+
+        <TouchableOpacity style={s.btn} onPress={submitHire}>
+          <Text style={s.btnTxt}>{"⏱️"} Confirm Hourly Hire</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+
   // MY BOOKINGS (CLIENT)
   if (screen === "myBookings") return (
     <SafeAreaView style={s.safe}>
@@ -2217,7 +2859,12 @@ export default function App() {
           ? <Text style={{ color: "#888", textAlign: "center", marginTop: 40 }}>No bookings yet. Book your first ride!</Text>
           : clientBookings.map((b, i) => (
             <View key={i} style={s.card}>
-              <Text style={s.cardTitle}>{"🚗"} {b.service === "tuktuk" ? "Tuk Tuk" : b.service === "motorbike" ? "Delivery" : "Car Ride"}</Text>
+              <Text style={s.cardTitle}>{b.status === "scheduled" ? "📅" : "🚗"} {b.service === "tuktuk" ? "Tuk Tuk" : b.service === "motorbike" ? "Delivery" : "Car Ride"}{b.status === "scheduled" ? " (Scheduled)" : ""}</Text>
+              {b.scheduled_for && (
+                <Text style={{ color: "#2196f3", fontWeight: "bold", fontSize: 13, marginTop: 4 }}>
+                  {"🕐"} {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </Text>
+              )}
               <Text style={{ color: "#888", fontSize: 13, marginTop: 4 }}>{"📍"} From: {b.pickup}</Text>
               <Text style={{ color: "#888", fontSize: 13 }}>{"🏁"} To: {b.dropoff}</Text>
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
