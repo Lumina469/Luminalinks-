@@ -3534,19 +3534,37 @@ export default function App() {
   // Saves vehicle info after Didit verification — no photos, no admin
   // approval needed, since this is just operational data (what shows up on
   // the client's tracking screen), not an identity/compliance check.
+  // EXCEPTION: car drivers also need their actual Driver's License here —
+  // Didit only verifies IDENTITY (who someone is), not driving eligibility.
+  // A driver's license is a completely separate, real compliance check that
+  // the old manual flow used to collect — this restores it as its own step,
+  // matching the old rule that only car drivers need one (tuktuk and
+  // motorbike never did).
   const submitVehicleDetails = async () => {
     const { data: { user: u } } = await supabase.auth.getUser();
     if (!u) { Alert.alert("Error", "Please log in again."); return; }
     const needsExpiry = authRole === "car_driver" || authRole === "tuktuk_driver";
+    const needsLicense = authRole === "car_driver";
     if (!vehMake || !vehColor || (needsExpiry && (!roadWorthyExpiry || !registrationExpiry))) {
       Alert.alert("Missing details", "Please fill in all required fields.");
       return;
+    }
+    if (needsLicense && (!licFront || !licBack)) {
+      Alert.alert("Missing details", "Please upload your Driver's License (front and back) — required for car drivers.");
+      return;
+    }
+    let licFrontPath: string | null = null;
+    let licBackPath: string | null = null;
+    if (needsLicense) {
+      licFrontPath = await uploadPrivateDocument(licFront!, "kyc-documents", `${u.id}/license_front.jpg`);
+      licBackPath = await uploadPrivateDocument(licBack!, "kyc-documents", `${u.id}/license_back.jpg`);
     }
     await supabase.from("profiles").update({
       vehicle_make: vehMake,
       vehicle_color: vehColor,
       vehicle_plate: vehPlate || null,
       ...(needsExpiry ? { road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry } : {}),
+      ...(needsLicense ? { kyc_license_front_path: licFrontPath, kyc_license_back_path: licBackPath } : {}),
     }).eq("id", u.id);
     go("pending");
   };
@@ -4375,6 +4393,24 @@ export default function App() {
             <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#5A6B85" value={roadWorthyExpiry} onChangeText={setRoadWorthyExpiry} />
             <Text style={{ color: "#2DD4BF", fontSize: 12, marginBottom: 6 }}>Vehicle Registration Expiry</Text>
             <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#5A6B85" value={registrationExpiry} onChangeText={setRegistrationExpiry} />
+          </>
+        )}
+        {authRole === "car_driver" && (
+          <>
+            <Text style={s.sectionTitle}>DRIVER'S LICENSE (REQUIRED)</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+              Didit only verifies who you are — this confirms you're actually licensed to drive.
+            </Text>
+            <Text style={{ color: "#8A9BB8", marginBottom: 6 }}>Front side:</Text>
+            <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicFront)}>
+              {licFront ? <Image source={{ uri: licFront }} style={s.uploadImg} /> :
+                <><Ionicons name="document-text" size={36} color="#2DD4BF" /><Text style={{ color: "#8A9BB8", marginTop: 8 }}>Tap to upload front</Text></>}
+            </TouchableOpacity>
+            <Text style={{ color: "#8A9BB8", marginBottom: 6 }}>Back side:</Text>
+            <TouchableOpacity style={s.uploadBox} onPress={() => pickPhoto(setLicBack)}>
+              {licBack ? <Image source={{ uri: licBack }} style={s.uploadImg} /> :
+                <><Ionicons name="document-text" size={36} color="#2DD4BF" /><Text style={{ color: "#8A9BB8", marginTop: 8 }}>Tap to upload back</Text></>}
+            </TouchableOpacity>
           </>
         )}
         <TouchableOpacity style={s.btn} onPress={submitVehicleDetails}>
