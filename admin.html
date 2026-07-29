@@ -2358,15 +2358,32 @@ function renderKYCCards(drivers) {
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
           ${d.didit_status === 'approved'
-            ? 'Automatically approved by Didit — no action needed.'
+            ? 'Automatically approved by Didit — no action needed for identity.'
             : d.didit_status === 'declined'
             ? 'Automatically declined by Didit. If this driver disputes it, review their case directly in the Didit console rather than manually approving here — overriding an automated decline without checking the actual reason risks letting someone through who was declined for a real reason.'
             : d.didit_status === 'in_review'
             ? "Didit flagged this one for human review on their end — check the Didit console (business.didit.me) for the actual case, not here. This app will update automatically once Didit resolves it."
             : 'Verification in progress — this driver hasn\'t finished the Didit capture flow yet.'}
         </div>
+
+        ${d.role === 'car_driver' ? `
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;border-top:1px solid var(--border);padding-top:12px;">Driver's License</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">
+            Didit only verifies identity — it never checks whether someone is actually licensed to drive. This needs a real look, separate from the identity result above.
+          </div>
+          ${d.kyc_license_front_path ? `
+            <button class="btn btn-gold btn-sm" style="width:100%;margin-bottom:8px;" onclick="viewKycDocuments('${d.id}')">📄 View License Photos</button>
+            <div style="display:flex;gap:8px;">
+              ${!d.license_verified ? `
+                <button class="btn btn-green btn-sm" onclick="approveLicense('${d.id}','${d.full_name}')">✓ Approve License</button>
+                <button class="btn btn-red btn-sm" onclick="rejectLicense('${d.id}','${d.full_name}')">✗ Reject License</button>
+              ` : `<span class="badge green">License Approved</span>`}
+            </div>
+          ` : `<div style="font-size:12px;color:var(--gold);">⚠️ No license photos uploaded yet — driver hasn't finished this step.</div>`}
+        ` : ''}
+
         ${d.is_verified ? `
-          <button class="btn btn-ghost btn-sm" onclick="suspendDriver('${d.id}','${d.full_name}')">Suspend</button>
+          <button class="btn btn-ghost btn-sm" style="margin-top:12px;" onclick="suspendDriver('${d.id}','${d.full_name}')">Suspend</button>
         ` : ''}
       ` : `
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Document Photos</div>
@@ -2410,6 +2427,22 @@ async function suspendDriver(id, name) {
   if (!reason) return;
   await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ suspended: true, suspension_reason: reason, is_verified: false }) });
   alert(`${name} has been suspended.`);
+  await loadKYCDrivers();
+}
+
+// Separate from Didit's identity approval — Didit never checks whether
+// someone actually holds a valid driver's license, only who they are.
+async function approveLicense(id, name) {
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ license_verified: true }) });
+  alert(`✅ ${name}'s driver's license has been approved.`);
+  await loadKYCDrivers();
+}
+
+async function rejectLicense(id, name) {
+  const reason = prompt(`Reason for rejecting ${name}'s license:`);
+  if (!reason) return;
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ license_verified: false, is_verified: false, suspension_reason: `License rejected: ${reason}` }) });
+  alert(`${name}'s license was rejected — they've also been un-verified until this is resolved, since a passed identity check alone doesn't mean they're licensed to drive.`);
   await loadKYCDrivers();
 }
 
