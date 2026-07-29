@@ -127,6 +127,10 @@ let PLATFORM_SETTINGS = {
   car_min_fare: 20,
   tuktuk_min_fare: 10,
   motorbike_min_fare: 15,
+  night_mult_evening: 1.2,
+  night_mult_night: 1.5,
+  night_mult_late: 2.0,
+  night_mult_early: 1.5,
   founder_code: "F0UN-D3R-LNK-X9Q2",
   founder_discount: 100,
   staff_code: "LUMINA-STAFF-2026",
@@ -159,10 +163,10 @@ const loadPlatformSettings = async () => {
 const getNightMultiplier = () => {
   const hour = new Date().getHours();
   if (hour >= 6 && hour < 20) return { multiplier: 1.0, label: "Standard Hours", color: "#2DD4BF" };
-  if (hour >= 20 && hour < 22) return { multiplier: 1.2, label: "Evening x1.2", color: "#F5A623" };
-  if (hour >= 22 && hour < 24) return { multiplier: 1.5, label: "Night x1.5", color: "#f5a623" };
-  if (hour >= 0 && hour < 4) return { multiplier: 2.0, label: "Late Night x2.0", color: "#F87171" };
-  if (hour >= 4 && hour < 6) return { multiplier: 1.5, label: "Early Morning x1.5", color: "#f5a623" };
+  if (hour >= 20 && hour < 22) return { multiplier: PLATFORM_SETTINGS.night_mult_evening, label: `Evening x${PLATFORM_SETTINGS.night_mult_evening}`, color: "#F5A623" };
+  if (hour >= 22 && hour < 24) return { multiplier: PLATFORM_SETTINGS.night_mult_night, label: `Night x${PLATFORM_SETTINGS.night_mult_night}`, color: "#f5a623" };
+  if (hour >= 0 && hour < 4) return { multiplier: PLATFORM_SETTINGS.night_mult_late, label: `Late Night x${PLATFORM_SETTINGS.night_mult_late}`, color: "#F87171" };
+  if (hour >= 4 && hour < 6) return { multiplier: PLATFORM_SETTINGS.night_mult_early, label: `Early Morning x${PLATFORM_SETTINGS.night_mult_early}`, color: "#f5a623" };
   return { multiplier: 1.0, label: "Standard Hours", color: "#2DD4BF" };
 };
 
@@ -420,6 +424,9 @@ export default function App() {
   const [roadWorthyExpiry, setRoadWorthyExpiry] = useState(""); // format YYYY-MM-DD
   const [registrationExpiry, setRegistrationExpiry] = useState("");
   const [verifyStep, setVerifyStep] = useState(1);
+  const [showDiditWebView, setShowDiditWebView] = useState(false);
+  const [diditSessionUrl, setDiditSessionUrl] = useState<string | null>(null);
+  const [startingDiditVerification, setStartingDiditVerification] = useState(false);
 
   // Location
   const [location, setLocation] = useState<any>(null);
@@ -1504,7 +1511,7 @@ export default function App() {
     if (extraStops.some(s => s.pin)) recalcMultiStopFare();
   }, [stopsFareKey]);
 
-  const saveBookingToSupabase = async (pickup: string, dropoff: string, service: string, price: number, paymentMethodForBooking: string) => {
+  const saveBookingToSupabase = async (pickup: string, dropoff: string, service: string, price: number, paymentMethodForBooking: string, originalPrice?: number, promoType?: string | null) => {
     const { data: { user: u } } = await supabase.auth.getUser();
     const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
     const scheduledFor = scheduleRide && scheduledDay && scheduledTime
@@ -1518,6 +1525,8 @@ export default function App() {
       dropoff: stopsText ? `${dropoff} → ${stopsText}` : dropoff,
       service,
       price,
+      original_price: originalPrice ?? price,
+      promo_type: promoType ?? null,
       status: scheduledFor ? "scheduled" : "pending",
       scheduled_for: scheduledFor,
       payment_method: paymentMethodForBooking,
@@ -1528,6 +1537,7 @@ export default function App() {
 
   const PAYSTACK_PUBLIC_KEY = "pk_test_bf1a50632c17401a944e134786ff7a9610768d13";
   const VERIFY_PAYMENT_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/verify-payment";
+  const CREATE_KYC_SESSION_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/create-kyc-session";
   const PROCESS_WITHDRAWAL_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/process-withdrawal";
 
   const rebookRide = async (booking: any) => {
@@ -1614,7 +1624,7 @@ export default function App() {
       `Fare: GHS ${finalFare}${promoApplied && finalFare !== originalFare ? ` (was GHS ${originalFare})` : ""}\nPayment: ${methodLabel}${promoNote}${scheduleNote}\n\n${timingNote}`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: scheduleRide ? "Schedule Ride" : "Book Ride", onPress: () => processBooking(finalFare) },
+        { text: scheduleRide ? "Schedule Ride" : "Book Ride", onPress: () => processBooking(finalFare, originalFare) },
       ]
     );
     } finally {
@@ -1698,8 +1708,9 @@ export default function App() {
     setShowPaystack(true);
   };
 
-  const processBooking = async (finalFare?: number) => {
+  const processBooking = async (finalFare?: number, originalFareParam?: number) => {
     const fare = finalFare !== undefined ? finalFare : (estFare || 20);
+    const trueOriginalFare = originalFareParam !== undefined ? originalFareParam : fare;
 
     // Auto-apply promo credit if client has any (expires after 7 days — simplified: deduct immediately)
     if (!promoApplied && promoCredit > 0) {
@@ -1715,7 +1726,7 @@ export default function App() {
             await supabase.from("profiles").update({ promo_credit: promoCredit - creditToUse }).eq("id", u.id);
             setPromoCredit(promoCredit - creditToUse);
           }
-          await doProcessBooking(fareAfterCredit);
+          await doProcessBooking(fareAfterCredit, trueOriginalFare, "credit");
         }}]
       );
       return;
@@ -1731,17 +1742,17 @@ export default function App() {
           `25% off your first ride! Fare reduced from GHS ${fare} to GHS ${welcomeFare}.`,
           [{ text: "Great!", onPress: async () => {
             await markWelcomeDiscountUsed();
-            await doProcessBooking(welcomeFare);
+            await doProcessBooking(welcomeFare, trueOriginalFare, "welcome");
           }}]
         );
         return;
       }
     }
-    await doProcessBooking(fare);
+    await doProcessBooking(fare, trueOriginalFare, promoApplied?.type || null);
   };
 
-  const doProcessBooking = async (fare: number) => {
-    const booking = await saveBookingToSupabase(pickupText, dropoffText, selectedService, fare, paymentMethod);
+  const doProcessBooking = async (fare: number, originalFare?: number, promoType?: string | null) => {
+    const booking = await saveBookingToSupabase(pickupText, dropoffText, selectedService, fare, paymentMethod, originalFare ?? fare, promoType ?? null);
     haptic("success");
     const nb = {
       id: booking?.id || Date.now().toString(),
@@ -1750,6 +1761,8 @@ export default function App() {
       status: "pending",
       payment_status: paymentMethod === "cash" ? "n/a" : "awaiting_completion",
       price: fare,
+      original_price: originalFare ?? fare,
+      promo_type: promoType ?? null,
       pickup: pickupText,
       dropoff: dropoffText,
       payment_method: paymentMethod,
@@ -2029,12 +2042,26 @@ export default function App() {
     setRideDeliveryProofPhoto(null);
 
     let cashCommissionOwed = 0;
+    let cashCreditedExtra = 0;
 
-    // Handle commission differently based on payment method:
-    if (order?.price) {
+    // Handle commission differently based on payment method. Also checks
+    // `original_price` here (not just `price`) — a founder ride has price=0,
+    // and the old `if (order?.price)` guard skipped this whole block for a
+    // falsy 0, meaning a founder ride never even attempted to pay the driver.
+    if (order?.price || order?.original_price) {
       const { data: { user: u } } = await supabase.auth.getUser();
       const driverId = u?.id || "00000000-0000-0000-0000-000000000002";
       const isCash = order.payment_method === "cash";
+
+      // Founder and Staff codes are absorbed by the platform (funded from
+      // platform commission/float) — the driver is fully protected and earns
+      // their normal 85% of the ORIGINAL fare, regardless of what the client
+      // actually paid. Every other discount (welcome, referral, custom promo
+      // codes) still works exactly as before: driver's cut is based on the
+      // discounted price actually charged.
+      const isPlatformAbsorbedPromo = order.promo_type === "founder" || order.promo_type === "staff";
+      const earningsBaseFare = isPlatformAbsorbedPromo ? (order.original_price ?? order.price) : order.price;
+      const protectedEarnings = parseFloat((earningsBaseFare * (1 - PLATFORM_SETTINGS.platform_commission)).toFixed(2));
 
       const { data: existingWallet } = await supabase
         .from("wallets")
@@ -2044,32 +2071,41 @@ export default function App() {
 
       if (isCash) {
         // Cash rides: the client pays the driver directly, in person — the platform
-        // never touches this money. So instead of crediting the driver (they've
-        // already collected 100% of the fare themselves), we deduct our 15%
-        // commission from their wallet. This is how commission actually gets
-        // collected on cash rides — without this, cash rides generated zero
-        // platform revenue AND incorrectly credited the driver twice.
-        const commissionOwed = parseFloat((order.price * PLATFORM_SETTINGS.platform_commission).toFixed(2));
-        cashCommissionOwed = commissionOwed;
+        // never touches this money. Normally that means we DEDUCT our 15%
+        // commission from the driver's wallet (they collected 100% of the fare
+        // themselves, but only 85% was actually theirs to keep). But on a
+        // platform-absorbed promo (founder/staff), the client paid less cash
+        // than the driver's protected earnings — so instead of deducting, we
+        // CREDIT the driver the difference, funded by the platform.
+        const walletAdjustment = parseFloat((protectedEarnings - order.price).toFixed(2));
+        if (walletAdjustment < 0) {
+          cashCommissionOwed = Math.abs(walletAdjustment);
+        } else {
+          cashCreditedExtra = walletAdjustment;
+        }
         if (existingWallet) {
           await supabase.from("wallets").update({
-            balance: parseFloat((existingWallet.balance - commissionOwed).toFixed(2)),
+            balance: parseFloat((existingWallet.balance + walletAdjustment).toFixed(2)),
+            total_earned: walletAdjustment > 0 ? parseFloat((existingWallet.total_earned + walletAdjustment).toFixed(2)) : existingWallet.total_earned,
             last_updated: new Date().toISOString(),
           }).eq("user_id", driverId);
         } else {
           await supabase.from("wallets").insert({
             user_id: driverId,
-            balance: -commissionOwed,
-            total_earned: 0,
+            balance: walletAdjustment,
+            total_earned: walletAdjustment > 0 ? walletAdjustment : 0,
             total_withdrawn: 0,
             currency: "GHS",
             last_updated: new Date().toISOString(),
           });
         }
+        if (cashCreditedExtra > 0) await notifyPaymentReceived(driverId, cashCreditedExtra, "a promo-protected ride");
       } else {
-        // MoMo/Card: the platform already collected 100% via Paystack, so credit
-        // the driver their 85% share now.
-        const driverEarnings = parseFloat((order.price * (1 - PLATFORM_SETTINGS.platform_commission)).toFixed(2));
+        // MoMo/Card: the platform collected whatever the client actually paid
+        // via Paystack (possibly GHS 0 on a free founder ride) — but the driver
+        // is credited their full protected earnings regardless. On a normal
+        // (non-platform-absorbed) ride this is unchanged: 85% of the price paid.
+        const driverEarnings = protectedEarnings;
         if (existingWallet) {
           await supabase.from("wallets").update({
             balance: parseFloat((existingWallet.balance + driverEarnings).toFixed(2)),
@@ -2102,11 +2138,12 @@ export default function App() {
     }
 
     const isCashRide = order?.payment_method === "cash";
+    const cashMessage = cashCreditedExtra > 0
+      ? `This ride used a platform-covered promo code — you collected less cash than your normal earnings, so GHS ${cashCreditedExtra.toFixed(2)} has been credited to your wallet to make up the difference.`
+      : `Since this was a cash ride, GHS ${cashCommissionOwed.toFixed(2)} (our 15% commission) has been deducted from your wallet — you already collected the full fare in person.`;
     Alert.alert(
       "Ride Complete!",
-      isCashRide
-        ? `Since this was a cash ride, GHS ${cashCommissionOwed.toFixed(2)} (our 15% commission) has been deducted from your wallet — you already collected the full fare in person.`
-        : "If the client chose MoMo or Card, they'll be prompted to pay now.",
+      isCashRide ? cashMessage : "If the client chose MoMo or Card, they'll be prompted to pay now.",
       [{ text: "OK", onPress: () => go("driverHome") }]
     );
     setActiveBookingId(null);
@@ -3466,6 +3503,41 @@ export default function App() {
     }
   };
 
+  // Starts an instant identity verification via Didit — a hosted, Didit-branded
+  // flow (selfie + Ghana Card capture) opened in a WebView. The actual
+  // approve/decline decision comes back later via a Supabase Edge Function
+  // webhook (not through this WebView directly), which updates is_verified on
+  // the profile automatically. This sits ALONGSIDE the manual document upload
+  // flow below, not replacing it — either path gets a driver verified.
+  const startDiditVerification = async () => {
+    if (startingDiditVerification) return;
+    setStartingDiditVerification(true);
+    try {
+      const { data: { user: u } } = await supabase.auth.getUser();
+      if (!u) {
+        Alert.alert("Sign in required", "Instant verification needs a real account — demo accounts can't use this.");
+        setStartingDiditVerification(false);
+        return;
+      }
+      const res = await fetch(CREATE_KYC_SESSION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const data = await res.json();
+      setStartingDiditVerification(false);
+      if (data.sessionUrl) {
+        setDiditSessionUrl(data.sessionUrl);
+        setShowDiditWebView(true);
+      } else {
+        Alert.alert("Couldn't start verification", data.error || "Please try again, or use the manual upload below instead.");
+      }
+    } catch (e) {
+      setStartingDiditVerification(false);
+      Alert.alert("Couldn't start verification", "Please check your connection and try again, or use the manual upload below instead.");
+    }
+  };
+
   const submitVerify = async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -4217,6 +4289,41 @@ export default function App() {
     );
   }
 
+  // DIDIT INSTANT VERIFICATION — hosted flow in a WebView, same pattern as
+  // Paystack. Completion isn't detected here (Didit reports the result via
+  // webhook, not a postMessage) — closing this just sends the driver to the
+  // Pending screen, where "Check Status" will show Approved once the webhook
+  // has landed (usually within seconds).
+  if (showDiditWebView) return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <TouchableOpacity onPress={() => {
+          setShowDiditWebView(false);
+          setDiditSessionUrl(null);
+          go("pending");
+        }}><Text style={s.navLink}>Done</Text></TouchableOpacity>
+        <Text style={s.navLogo}>Identity Verification</Text>
+        <View />
+      </View>
+      {diditSessionUrl && (
+        <WebView
+          source={{ uri: diditSessionUrl }}
+          style={{ flex: 1 }}
+          allowsInlineMediaPlayback={true}
+          mediaPlaybackRequiresUserAction={false}
+          onPermissionRequest={(event: any) => {
+            // Didit's hosted flow needs camera access to capture the selfie
+            // and Ghana Card photo. WebViews block camera/mic access by
+            // default — without explicitly granting whatever it asks for
+            // here, the page loads fine but the camera step silently does
+            // nothing, which is exactly what "stuck on Not Started" looks like.
+            event.grant(event.resources);
+          }}
+        />
+      )}
+    </SafeAreaView>
+  );
+
   // MAINTENANCE MODE — highest priority, blocks the entire app when active
   if (maintenanceMode) return (
     <SafeAreaView style={s.safe}>
@@ -4597,6 +4704,25 @@ export default function App() {
             : "Complete all steps below — approval is instant once everything is submitted."}
         </Text>
         <Text style={{ color: "#5A6B85", fontSize: 11, marginBottom: 20 }}>Expired documents are automatically rejected.</Text>
+
+        {verifyStep === 1 && (
+          <View style={[s.card, { borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 20 }]}>
+            <Text style={s.cardTitle}><Ionicons name="flash" size={16} color="#2DD4BF" /> Instant Verification (Recommended)</Text>
+            <Text style={[s.cardSub, { marginTop: 4, marginBottom: 12 }]}>
+              Verify with a quick selfie and Ghana Card scan — usually done in under a minute, no waiting for manual review.
+            </Text>
+            {startingDiditVerification ? (
+              <Pulse label="Starting verification..." size={28} />
+            ) : (
+              <TouchableOpacity style={s.btn} onPress={startDiditVerification}>
+                <Text style={s.btnTxt}>Verify Instantly</Text>
+              </TouchableOpacity>
+            )}
+            <Text style={{ color: "#5A6B85", fontSize: 11, textAlign: "center", marginTop: 10 }}>
+              Prefer to upload documents manually instead? Continue below.
+            </Text>
+          </View>
+        )}
 
         {/* ── STEP 1: GHANA CARD (all roles) ── */}
         {verifyStep === 1 && (

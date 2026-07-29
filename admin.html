@@ -2290,8 +2290,10 @@ async function loadKYCDrivers() {
   const all = await sb('profiles?select=*&role=neq.client&order=created_at.desc');
   allKYCDrivers = Array.isArray(all) ? all : [];
   renderKYCCards(allKYCDrivers);
-  // Update badge with pending count
-  const pending = allKYCDrivers.filter(d => !d.is_verified && !d.suspended).length;
+  // Badge only counts genuinely manual cases needing a human decision — a
+  // driver mid-Didit-verification isn't something an admin should act on;
+  // Didit's own webhook resolves those automatically.
+  const pending = allKYCDrivers.filter(d => !d.is_verified && !d.suspended && !d.didit_status).length;
   document.getElementById('kyc-badge').textContent = pending;
   if (pending === 0) document.getElementById('kyc-badge').style.display = 'none';
 }
@@ -2346,21 +2348,43 @@ function renderKYCCards(drivers) {
         </div>
       ` : ''}
 
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Document Photos</div>
-      <button class="btn btn-gold btn-sm" style="width:100%;margin-bottom:4px;" onclick="viewKycDocuments('${d.id}')">📄 View Documents</button>
-
-      <div style="display:flex;gap:8px;margin-top:4px;">
-        ${!d.is_verified && !d.suspended ? `
-          <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">✓ Approve</button>
-          <button class="btn btn-red btn-sm" onclick="rejectDriver('${d.id}','${d.full_name}')">✗ Reject</button>
-        ` : ''}
+      ${d.didit_status ? `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Verification Method</div>
+        <div style="font-size:13px;margin-bottom:8px;">
+          ⚡ Didit Instant Verification —
+          <span class="badge ${d.didit_status === 'approved' ? 'green' : d.didit_status === 'declined' ? 'red' : 'gold'}">
+            ${d.didit_status === 'approved' ? 'Approved' : d.didit_status === 'declined' ? 'Declined' : d.didit_status === 'in_review' ? 'In Review' : d.didit_status}
+          </span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
+          ${d.didit_status === 'approved'
+            ? 'Automatically approved by Didit — no action needed.'
+            : d.didit_status === 'declined'
+            ? 'Automatically declined by Didit. If this driver disputes it, review their case directly in the Didit console rather than manually approving here — overriding an automated decline without checking the actual reason risks letting someone through who was declined for a real reason.'
+            : d.didit_status === 'in_review'
+            ? "Didit flagged this one for human review on their end — check the Didit console (business.didit.me) for the actual case, not here. This app will update automatically once Didit resolves it."
+            : 'Verification in progress — this driver hasn\'t finished the Didit capture flow yet.'}
+        </div>
         ${d.is_verified ? `
           <button class="btn btn-ghost btn-sm" onclick="suspendDriver('${d.id}','${d.full_name}')">Suspend</button>
         ` : ''}
-        ${d.suspended ? `
-          <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">Reinstate</button>
-        ` : ''}
-      </div>
+      ` : `
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Document Photos</div>
+        <button class="btn btn-gold btn-sm" style="width:100%;margin-bottom:4px;" onclick="viewKycDocuments('${d.id}')">📄 View Documents</button>
+
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          ${!d.is_verified && !d.suspended ? `
+            <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">✓ Approve</button>
+            <button class="btn btn-red btn-sm" onclick="rejectDriver('${d.id}','${d.full_name}')">✗ Reject</button>
+          ` : ''}
+          ${d.is_verified ? `
+            <button class="btn btn-ghost btn-sm" onclick="suspendDriver('${d.id}','${d.full_name}')">Suspend</button>
+          ` : ''}
+          ${d.suspended ? `
+            <button class="btn btn-green btn-sm" onclick="approveDriver('${d.id}','${d.full_name}')">Reinstate</button>
+          ` : ''}
+        </div>
+      `}
     </div>
   `).join('');
 }
