@@ -2423,7 +2423,12 @@ async function createPromoCode() {
     type: 'custom',
     discount_percent: discount,
     is_active: true,
-    ...(expiry && { expires_at: new Date(expiry).toISOString() }),
+    // A bare date like "2026-07-29" parses as midnight UTC at the START of that
+    // day — meaning a code meant to "expire today" was actually already expired
+    // for the rest of the day, moments after being created. Appending T23:59:59
+    // (parsed in the browser's local time, not UTC) makes it mean end-of-day
+    // instead, matching what an admin actually intends when picking a date.
+    ...(expiry && { expires_at: new Date(`${expiry}T23:59:59`).toISOString() }),
     ...(maxUses > 0 && { max_uses: maxUses }),
     ...(desc && { description: desc }),
   };
