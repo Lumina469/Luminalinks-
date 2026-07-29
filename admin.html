@@ -3,8 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LuminaLinks Admin Console</title>
+<title>Luma Admin Console</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -360,7 +362,7 @@
 <!-- LOGIN -->
 <div id="login-screen">
   <div class="login-box">
-    <div class="login-logo">LuminaLinks</div>
+    <div class="login-logo">Luma</div>
     <div class="login-sub">Admin Console — Founder Access Only</div>
     <div class="form-group">
       <div class="login-label">Email</div>
@@ -408,6 +410,20 @@
   </div>
 </div>
 
+<!-- KYC DOCUMENT VIEWER MODAL -->
+<div class="modal-overlay" id="doc-modal">
+  <div class="modal" style="max-width:700px;">
+    <div class="modal-title" id="doc-modal-title">Documents</div>
+    <div class="modal-sub">Links expire in 10 minutes — this is a private view, never a public link.</div>
+    <div id="doc-modal-body" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;max-height:60vh;overflow-y:auto;">
+      <div style="color:var(--text-muted);text-align:center;padding:20px;grid-column:1/-1;">Loading documents...</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('doc-modal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- NOTIFICATION MODAL -->
 <div class="modal-overlay" id="notif-modal">
   <div class="modal">
@@ -436,36 +452,10 @@
   </div>
 </div>
 
-<!-- WITHDRAW MODAL -->
-<div class="modal-overlay" id="withdraw-modal">
-  <div class="modal">
-    <div class="modal-title">💰 Withdraw Commission</div>
-    <div class="modal-sub">Withdraw your platform earnings. OTP required.</div>
-    <div class="form-group">
-      <label class="form-label">Amount (GHS)</label>
-      <input class="form-input" id="withdraw-amount" type="number" placeholder="0.00">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Withdrawal Method</label>
-      <select class="form-select" id="withdraw-method">
-        <option>MTN Mobile Money</option>
-        <option>Vodafone Cash</option>
-        <option>AirtelTigo Money</option>
-        <option>Bank Account</option>
-        <option>Visa/Mastercard</option>
-      </select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="document.getElementById('withdraw-modal').classList.remove('open')">Cancel</button>
-      <button class="btn btn-gold" onclick="initiateWithdraw()">Request OTP & Withdraw</button>
-    </div>
-  </div>
-</div>
-
 <!-- SIDEBAR -->
 <nav id="sidebar" style="display:none;">
   <div class="sidebar-logo">
-    <div class="sidebar-logo-text">LuminaLinks</div>
+    <div class="sidebar-logo-text">Luma</div>
     <div class="sidebar-logo-sub">Admin Console v1.0</div>
   </div>
   <div class="sidebar-nav">
@@ -476,9 +466,25 @@
     <button class="nav-item" onclick="showPage('operations')">
       <span class="nav-icon">🗺️</span><span>Live Operations</span>
     </button>
+    <div class="nav-section">Safety</div>
+    <button class="nav-item" onclick="showPage('sos')">
+      <span class="nav-icon">🚨</span><span>SOS Alerts</span>
+      <span class="nav-badge" id="sos-badge" style="background:var(--red);">0</span>
+    </button>
     <div class="nav-section">Management</div>
     <button class="nav-item" onclick="showPage('bookings')">
       <span class="nav-icon">🚗</span><span>Bookings</span>
+    </button>
+    <button class="nav-item" onclick="showPage('restaurants')">
+      <span class="nav-icon">🍔</span><span>Restaurants</span>
+      <span class="nav-badge" id="restaurant-badge">0</span>
+    </button>
+    <button class="nav-item" onclick="showPage('foodorders')">
+      <span class="nav-icon">🧾</span><span>Food Orders</span>
+    </button>
+    <button class="nav-item" onclick="showPage('lostfound')">
+      <span class="nav-icon">🔍</span><span>Lost & Found</span>
+      <span class="nav-badge" id="lostfound-badge">0</span>
     </button>
     <button class="nav-item" onclick="showPage('drivers')">
       <span class="nav-icon">👤</span><span>Drivers</span>
@@ -495,8 +501,8 @@
       <span class="nav-badge" id="kyc-badge">0</span>
     </button>
     <div class="nav-section">Finance</div>
-    <button class="nav-item" onclick="showPage('earnings')">
-      <span class="nav-icon">💰</span><span>Earnings</span>
+    <button class="nav-item" onclick="showPage('platformrevenue')">
+      <span class="nav-icon">🏦</span><span>Platform Revenue</span>
     </button>
     <div class="nav-section">Platform</div>
     <button class="nav-item" onclick="showPage('promos')">
@@ -551,9 +557,9 @@
     <div id="sos-alerts"></div>
     <div class="stats-grid">
       <div class="stat-card gold">
-        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-label">Today's Revenue (Est.)</div>
         <div class="stat-val" id="stat-today">GHS 0</div>
-        <div class="stat-sub">15% commission earned</div>
+        <div class="stat-sub">Quick estimate — see Platform Revenue for real balance</div>
       </div>
       <div class="stat-card green">
         <div class="stat-label">Total Bookings</div>
@@ -576,8 +582,8 @@
       <div>
         <div class="section-header">
           <div>
-            <div class="section-title">Revenue This Week</div>
-            <div class="section-sub">Daily commission earned (GHS)</div>
+            <div class="section-title">Revenue This Week (Est.)</div>
+            <div class="section-sub">Estimated daily commission from bookings — not your real Paystack balance</div>
           </div>
         </div>
         <div class="chart-box">
@@ -604,8 +610,8 @@
 
     <div class="section-header">
       <div>
-        <div class="section-title">Platform Breakdown</div>
-        <div class="section-sub">Revenue by service type</div>
+        <div class="section-title">Platform Breakdown (Est.)</div>
+        <div class="section-sub">Estimated revenue by service type</div>
       </div>
     </div>
     <div class="grid-3">
@@ -625,19 +631,26 @@
         <div class="stat-sub">total bookings</div>
       </div>
     </div>
+
+    <div class="section-header">
+      <div>
+        <div class="section-title">Top Drivers This Month</div>
+        <div class="section-sub">Ranked by completed rides — GHS 100/75/50/30/20 awarded to the top 5 monthly</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Rank</th><th>Driver</th><th>Completed Rides</th><th>Award</th></tr></thead>
+        <tbody id="top-drivers-table">
+          <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- LIVE OPERATIONS PAGE -->
   <div class="page" id="page-operations">
-    <div class="map-box">
-      <div class="map-grid"></div>
-      <div id="map-dots"></div>
-      <div class="map-label">
-        <div style="font-size:32px;margin-bottom:8px;">🗺️</div>
-        <div style="color:var(--text);font-weight:700;margin-bottom:4px;">Live Operations Map</div>
-        <div>Active rides shown below — map integration available with full GPS data</div>
-      </div>
-    </div>
+    <div id="ops-map" style="width:100%;height:420px;border-radius:12px;overflow:hidden;margin-bottom:20px;border:1px solid var(--border);"></div>
     <div class="section-header">
       <div class="section-title">Active Rides Right Now</div>
     </div>
@@ -721,45 +734,50 @@
   </div>
 
   <!-- EARNINGS PAGE -->
-  <div class="page" id="page-earnings">
-    <div class="stats-grid">
-      <div class="stat-card gold">
-        <div class="stat-label">Available to Withdraw</div>
-        <div class="stat-val" id="earn-available">GHS 0</div>
-        <div class="stat-sub">15% platform commission</div>
+  <!-- PLATFORM REVENUE PAGE -->
+  <div class="page" id="page-platformrevenue">
+    <div class="alert warn">
+      <span>⚠️</span>
+      <span>This shows your REAL Paystack balance, minus everything still owed to drivers. Only the remainder is safe to withdraw as platform revenue — the rest belongs to drivers who haven't withdrawn yet.</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+      <div class="card">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Real Paystack Balance</div>
+        <div style="font-size:24px;font-weight:700;color:var(--text);" id="pr-paystack-balance">—</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Earned</div>
-        <div class="stat-val" id="earn-total">GHS 0</div>
-        <div class="stat-sub">All time gross commission</div>
+      <div class="card">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Owed to Drivers</div>
+        <div style="font-size:24px;font-weight:700;color:var(--gold);" id="pr-driver-wallets">—</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Withdrawn</div>
-        <div class="stat-val" id="earn-withdrawn">GHS 0</div>
-        <div class="stat-sub">All time withdrawals</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">This Month</div>
-        <div class="stat-val" id="earn-month">GHS 0</div>
-        <div class="stat-sub">Current month earnings</div>
+      <div class="card" style="border-color:var(--green);">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Available to Withdraw</div>
+        <div style="font-size:24px;font-weight:700;color:var(--green);" id="pr-available">—</div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">Withdraw Earnings</div>
-      <div class="card-sub">OTP verification required for all withdrawals. GHS 5,000+ requires double OTP.</div>
-      <button class="btn btn-gold" onclick="document.getElementById('withdraw-modal').classList.add('open')">💰 Initiate Withdrawal</button>
+    <button class="btn btn-ghost btn-sm" onclick="loadPlatformRevenue()" style="margin-bottom:20px;">↻ Refresh Balance</button>
+
+    <div class="card" style="max-width:420px;">
+      <h3 style="margin-top:0;">Withdraw Platform Revenue</h3>
+      <label style="font-size:12px;color:var(--text-muted);">Amount (GHS)</label>
+      <input type="number" id="pr-amount" class="form-input" style="width:100%;margin-bottom:12px;" placeholder="e.g. 500">
+      <label style="font-size:12px;color:var(--text-muted);">Mobile Money Network</label>
+      <select id="pr-provider" class="form-select" style="width:100%;margin-bottom:12px;">
+        <option value="mtn">MTN</option>
+        <option value="vodafone">Vodafone</option>
+        <option value="airteltigo">AirtelTigo</option>
+      </select>
+      <label style="font-size:12px;color:var(--text-muted);">Mobile Money Number</label>
+      <input type="text" id="pr-momo-number" class="form-input" style="width:100%;margin-bottom:16px;" placeholder="e.g. 0551234567">
+      <button class="btn btn-green" style="width:100%;" onclick="withdrawPlatformRevenue()">Withdraw</button>
     </div>
-    <div class="section-header" style="margin-top:8px;">
-      <div class="section-title">Withdrawal History</div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th></tr></thead>
-        <tbody id="withdrawal-history">
-          <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No withdrawals yet.</td></tr>
-        </tbody>
-      </table>
-    </div>
+
+    <h3 style="margin-top:32px;">Withdrawal History</h3>
+    <table class="data-table">
+      <thead><tr><th>Amount</th><th>Network</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody id="pr-history-table">
+        <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">Loading...</td></tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- NOTIFICATIONS PAGE -->
@@ -790,7 +808,7 @@
 
     <div class="card" style="margin-top:8px;">
       <div class="card-title">🎂 Birthday Mode</div>
-      <div class="card-sub">One tap — notifies all users that it's your birthday. Tipping button appears for 24 hours only.</div>
+      <div class="card-sub">One tap — shows a celebratory banner to all users for 24 hours. (No payment flow — visual banner only.)</div>
       <div class="toggle-wrap">
         <div class="toggle" id="birthday-toggle" onclick="toggleBirthday()"></div>
         <span class="toggle-label">Birthday mode is OFF</span>
@@ -839,7 +857,7 @@
       <div class="setting-row">
         <div class="setting-info">
           <div class="setting-name">Staff Discount Code</div>
-          <div class="setting-desc">Adjustable discount for LuminaLinks staff</div>
+          <div class="setting-desc">Adjustable discount for Luma staff</div>
         </div>
         <div class="setting-control">
           <input class="form-input" style="width:200px;" id="staff-code" value="LUMINA-STAFF-2026">
@@ -854,25 +872,55 @@
           <div class="setting-name">Surge Multipliers</div>
           <div class="setting-desc">Automatic surge levels based on pending ride count</div>
         </div>
-        <div class="setting-control">
-          <span class="badge green">3+ rides: 1.1x</span>
-          <span class="badge gold">5+ rides: 1.25x</span>
-          <span class="badge red">10+ rides: 1.5x</span>
+      </div>
+      <div class="grid-3" style="margin-bottom:12px;">
+        <div class="form-group">
+          <label class="form-label">Moderate: rides ≥</label>
+          <input class="form-input" id="surge-threshold-moderate" type="number" min="1" step="1">
+          <label class="form-label" style="margin-top:6px;">Multiplier</label>
+          <input class="form-input" id="surge-multiplier-moderate" type="number" min="1" step="0.05">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Busy: rides ≥</label>
+          <input class="form-input" id="surge-threshold-busy" type="number" min="1" step="1">
+          <label class="form-label" style="margin-top:6px;">Multiplier</label>
+          <input class="form-input" id="surge-multiplier-busy" type="number" min="1" step="0.05">
+        </div>
+        <div class="form-group">
+          <label class="form-label">High Demand: rides ≥</label>
+          <input class="form-input" id="surge-threshold-high" type="number" min="1" step="1">
+          <label class="form-label" style="margin-top:6px;">Multiplier</label>
+          <input class="form-input" id="surge-multiplier-high" type="number" min="1" step="0.05">
         </div>
       </div>
+      <button class="btn btn-gold btn-sm" onclick="saveSurgeSettings()">Save Surge Settings</button>
 
-      <div class="setting-row">
-        <div class="setting-info">
+      <div class="setting-row" style="margin-top:16px; flex-direction:column; align-items:stretch;">
+        <div class="setting-info" style="margin-bottom:10px;">
           <div class="setting-name">Night Pricing</div>
-          <div class="setting-desc">Automatic multipliers by time of day</div>
+          <div class="setting-desc">Automatic multipliers by time of day — 6AM–8PM is always 1.0x (standard) and isn't editable, since that's the baseline.</div>
         </div>
-        <div class="setting-control" style="flex-wrap:wrap;gap:6px;">
-          <span class="badge grey">6AM–8PM: 1.0x</span>
-          <span class="badge grey">8PM–10PM: 1.2x</span>
-          <span class="badge gold">10PM–12AM: 1.5x</span>
-          <span class="badge red">12AM–4AM: 2.0x</span>
-          <span class="badge gold">4AM–6AM: 1.5x</span>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Evening — 8PM to 10PM</label>
+            <input class="form-input" id="night-mult-evening" type="number" min="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Night — 10PM to 12AM</label>
+            <input class="form-input" id="night-mult-night" type="number" min="1" step="0.05">
+          </div>
         </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Late Night — 12AM to 4AM</label>
+            <input class="form-input" id="night-mult-late" type="number" min="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Early Morning — 4AM to 6AM</label>
+            <input class="form-input" id="night-mult-early" type="number" min="1" step="0.05">
+          </div>
+        </div>
+        <button class="btn btn-gold btn-sm" style="align-self:flex-start;" onclick="saveNightSettings()">Save Night Pricing</button>
       </div>
     </div>
 
@@ -882,18 +930,88 @@
       <div class="grid-3">
         <div class="form-group">
           <label class="form-label">Car Minimum (GHS)</label>
-          <input class="form-input" value="20" type="number">
+          <input class="form-input" id="car-min-fare" value="20" type="number" min="1">
         </div>
         <div class="form-group">
           <label class="form-label">Tuk Tuk Minimum (GHS)</label>
-          <input class="form-input" value="10" type="number">
+          <input class="form-input" id="tuktuk-min-fare" value="10" type="number" min="1">
         </div>
         <div class="form-group">
           <label class="form-label">Motorbike Minimum (GHS)</label>
-          <input class="form-input" value="15" type="number">
+          <input class="form-input" id="motorbike-min-fare" value="15" type="number" min="1">
         </div>
       </div>
-      <button class="btn btn-gold">Save Fare Floors</button>
+      <button class="btn btn-gold" onclick="saveFareFloors()">Save Fare Floors</button>
+    </div>
+  </div>
+
+  <!-- SOS ALERTS PAGE -->
+  <div class="page" id="page-sos">
+    <div class="alert" style="background:rgba(244,67,54,0.1);border-color:var(--red);">
+      <span>🚨</span>
+      <span>Live emergency alerts. Every SOS trigger from a client or driver appears here instantly with their location. Call the person and/or police immediately if unresolved.</span>
+    </div>
+    <div id="sos-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
+      <div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">Loading SOS alerts...</div>
+    </div>
+  </div>
+
+  <!-- RESTAURANTS PAGE -->
+  <div class="page" id="page-restaurants">
+    <div class="alert warn">
+      <span>⚠️</span>
+      <span>Review each restaurant's KYC documents (Ghana Card, Food Safety Certificate) before approving. Once approved, the owner can open for orders and appear to clients.</span>
+    </div>
+    <div class="search-bar">
+      <input class="search-input" id="restaurant-search" placeholder="Search by business name..." oninput="filterRestaurants()">
+      <select class="form-select" style="width:180px;" id="restaurant-filter" onchange="filterRestaurants()">
+        <option value="pending">Pending Approval</option>
+        <option value="approved">Already Approved</option>
+        <option value="">All Restaurants</option>
+      </select>
+    </div>
+    <div id="restaurant-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
+      <div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">Loading restaurants...</div>
+    </div>
+  </div>
+
+  <!-- FOOD ORDERS PAGE -->
+  <div class="page" id="page-foodorders">
+    <div class="search-bar">
+      <input class="search-input" id="foodorder-search" placeholder="Search by client or restaurant name..." oninput="filterFoodOrders()">
+      <select class="form-select" style="width:200px;" id="foodorder-filter" onchange="filterFoodOrders()">
+        <option value="">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="preparing">Preparing</option>
+        <option value="ready_for_pickup">Ready for Pickup</option>
+        <option value="rider_assigned">Rider Assigned</option>
+        <option value="picked_up">Picked Up</option>
+        <option value="delivered">Delivered</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr><th>Client</th><th>Restaurant</th><th>Status</th><th>Total</th><th>Payment</th><th>Placed</th></tr>
+      </thead>
+      <tbody id="foodorder-rows">
+        <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:40px;">Loading orders...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- LOST & FOUND PAGE -->
+  <div class="page" id="page-lostfound">
+    <div class="search-bar">
+      <input class="search-input" id="lostfound-search" placeholder="Search by client or driver name..." oninput="filterLostFound()">
+      <select class="form-select" style="width:180px;" id="lostfound-filter" onchange="filterLostFound()">
+        <option value="">All Reports</option>
+        <option value="reported">Awaiting Driver</option>
+        <option value="found">Found</option>
+      </select>
+    </div>
+    <div id="lostfound-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;">
+      <div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">Loading reports...</div>
     </div>
   </div>
 
@@ -987,19 +1105,46 @@ const SUPABASE_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhd2R0enFnd2hxY2hqdXVyc2pqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1ODE2MzAsImV4cCI6MjA5MjE1NzYzMH0.IFukRWG6r6oLRT4HdLBHVCk2q-kjtcXRB47ZxbXG1Zs';
 
 const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  ...opts,
   headers: {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${window._sbToken || SUPABASE_ANON_KEY}`,
     'Content-Type': 'application/json',
     'Prefer': 'return=representation',
     ...opts.headers
-  },
-  ...opts
+  }
 }).then(r => r.json());
+
+// Generates a short-lived (10 min) private link to view a sensitive document
+// (Ghana Card, license, etc.) — never a permanent public URL.
+async function getSignedDocUrl(bucket, path) {
+  if (!path) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${bucket}/${path}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${window._sbToken || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ expiresIn: 600 }),
+    });
+    const data = await res.json();
+    return data.signedURL ? `${SUPABASE_URL}/storage/v1${data.signedURL}` : null;
+  } catch (e) {
+    console.log('Could not sign document URL:', e.message);
+    return null;
+  }
+}
 
 // ── STATE ──
 let allBookings = [], allDrivers = [], allClients = [];
+let allFoodOrdersForRevenue = [];
 let otpAction = null, otpToken = null;
+let platformRevenueInterval = null;
+let opsMapInterval = null;
+let opsMap = null;
+let opsMapMarkers = [];
 let revenueChart = null;
 let birthdayOn = false, maintenanceOn = false;
 
@@ -1045,22 +1190,68 @@ function showPage(name) {
   });
   const titles = {
     dashboard: 'Dashboard', operations: 'Live Operations', bookings: 'All Bookings',
-    drivers: 'Driver Management', clients: 'Client Management', refunds: 'Refund Management',
+    drivers: 'Driver Management', clients: 'Client Management', refunds: 'Refund Requests',
     kyc: 'KYC — Driver Verification Review', promos: 'Promo Codes',
-    earnings: 'My Earnings', notifications: 'Notifications', settings: 'Platform Settings'
+    notifications: 'Notifications', settings: 'Platform Settings',
+    sos: 'SOS Emergency Alerts', restaurants: 'Restaurant Approval', foodorders: 'Food Orders',
+    lostfound: 'Lost & Found', platformrevenue: 'Platform Revenue'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
-  if (name === 'operations') renderLiveOps();
-  if (name === 'earnings') calcEarnings();
+  if (name === 'operations') { loadBookings().then(renderLiveOps); }
   if (name === 'kyc') loadKYCDrivers();
   if (name === 'promos') loadPromoCodes();
+  if (name === 'sos') loadSOSAlerts();
+  if (name === 'restaurants') loadRestaurants();
+  if (name === 'foodorders') loadFoodOrders();
+  if (name === 'lostfound') loadLostFound();
+  if (name === 'refunds') loadRefunds();
+
+  // Platform Revenue polls every 15s while open, and stops the moment you
+  // navigate away — so the balance stays current without wasting calls
+  // (checking the real Paystack balance) on pages nobody's looking at.
+  if (platformRevenueInterval) { clearInterval(platformRevenueInterval); platformRevenueInterval = null; }
+  if (name === 'platformrevenue') {
+    loadPlatformRevenue();
+    platformRevenueInterval = setInterval(loadPlatformRevenue, 15000);
+  }
+
+  // Same polling pattern for the live map — refreshes active ride positions
+  // every 8 seconds while the Operations page is open, stops the moment you
+  // navigate away.
+  if (opsMapInterval) { clearInterval(opsMapInterval); opsMapInterval = null; }
+  if (name === 'operations') {
+    opsMapInterval = setInterval(() => loadBookings().then(renderLiveOps), 8000);
+  }
 }
 
 // ── LOAD DATA ──
 async function loadAll() {
-  await Promise.all([loadBookings(), loadDrivers(), loadClients()]);
+  await Promise.all([loadBookings(), loadDrivers(), loadClients(), loadSystemSettings(), refreshSOSBadge(), refreshRestaurantBadge(), refreshLostFoundBadge(), loadRefunds(), loadFoodOrdersForRevenue()]);
   renderDashboard();
   buildChart();
+}
+
+// Loads food_orders specifically for revenue math (dashboard stat + chart).
+// Separate from loadFoodOrders() (used by the Food Orders management page)
+// since this needs to run as part of the core dashboard load, independent of
+// whether the admin has ever visited the Food Orders page this session.
+async function loadFoodOrdersForRevenue() {
+  const data = await sb('food_orders?select=*&order=created_at.desc&limit=500');
+  allFoodOrdersForRevenue = Array.isArray(data) ? data : [];
+}
+
+async function refreshSOSBadge() {
+  const data = await sb("sos_alerts?select=id&status=eq.active");
+  const count = Array.isArray(data) ? data.length : 0;
+  const badge = document.getElementById('sos-badge');
+  if (badge) { badge.textContent = count; badge.style.display = count === 0 ? 'none' : 'inline-block'; }
+}
+
+async function refreshRestaurantBadge() {
+  const data = await sb("restaurants?select=id&is_approved=eq.false");
+  const count = Array.isArray(data) ? data.length : 0;
+  const badge = document.getElementById('restaurant-badge');
+  if (badge) { badge.textContent = count; badge.style.display = count === 0 ? 'none' : 'inline-block'; }
 }
 
 async function loadBookings() {
@@ -1070,13 +1261,14 @@ async function loadBookings() {
 }
 
 async function loadDrivers() {
-  const data = await sb("profiles?select=*&eq.role=driver");
-  allDrivers = Array.isArray(data) ? data.filter(p => p.role === 'driver') : [];
+  const data = await sb("profiles?select=*");
+  const driverRoles = ['car_driver', 'tuktuk_driver', 'motorbike_rider'];
+  allDrivers = Array.isArray(data) ? data.filter(p => driverRoles.includes(p.role)) : [];
   renderDriversTable();
 }
 
 async function loadClients() {
-  const data = await sb("profiles?select=*&eq.role=client");
+  const data = await sb("profiles?select=*");
   allClients = Array.isArray(data) ? data.filter(p => p.role === 'client') : [];
   renderClientsTable();
 }
@@ -1087,7 +1279,15 @@ function refreshAll() { loadAll(); }
 function renderDashboard() {
   const today = new Date().toDateString();
   const todayBookings = allBookings.filter(b => new Date(b.created_at).toDateString() === today);
-  const todayRevenue = todayBookings.filter(b => b.status === 'completed').reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+  const rideRevenue = todayBookings.filter(b => b.status === 'completed').reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+
+  // Food commission: 10% of the food subtotal + 15% of the delivery fee — same
+  // rates as PLATFORM_SETTINGS in the mobile app. Only counts orders that have
+  // actually reached the client (delivered), matching how ride revenue only
+  // counts completed rides — a pending/cancelled order hasn't earned anything yet.
+  const todayFoodOrders = allFoodOrdersForRevenue.filter(o => new Date(o.created_at).toDateString() === today && o.status === 'delivered');
+  const foodRevenue = todayFoodOrders.reduce((s, o) => s + (o.subtotal || 0) * 0.10 + (o.delivery_fee || 0) * 0.15, 0);
+  const todayRevenue = rideRevenue + foodRevenue;
 
   document.getElementById('stat-today').textContent = `GHS ${todayRevenue.toFixed(2)}`;
   document.getElementById('stat-bookings').textContent = allBookings.length;
@@ -1103,6 +1303,7 @@ function renderDashboard() {
   const recent = allBookings.slice(0, 5);
   if (!recent.length) {
     tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No bookings yet.</td></tr>';
+    renderTopDrivers();
     return;
   }
   tbody.innerHTML = recent.map(b => `
@@ -1113,6 +1314,46 @@ function renderDashboard() {
       <td>${statusBadge(b.status)}</td>
     </tr>
   `).join('');
+
+  renderTopDrivers();
+}
+
+// Top Driver leaderboard — ranks by completed rides THIS CALENDAR MONTH,
+// matching the blueprint's monthly award cycle (GHS 100/75/50/30/20 for the
+// top 5). This is read-only visibility for the founder; the mobile app
+// doesn't currently pay these out automatically, so this is what makes the
+// manual payout decision possible each month.
+function renderTopDrivers() {
+  const tbody = document.getElementById('top-drivers-table');
+  if (!tbody) return;
+  const now = new Date();
+  const thisMonth = allBookings.filter(b =>
+    b.status === 'completed' && b.driver_id &&
+    new Date(b.created_at).getMonth() === now.getMonth() &&
+    new Date(b.created_at).getFullYear() === now.getFullYear()
+  );
+  const counts = {};
+  thisMonth.forEach(b => { counts[b.driver_id] = (counts[b.driver_id] || 0) + 1; });
+  const ranked = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  if (!ranked.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No completed rides yet this month.</td></tr>';
+    return;
+  }
+  const awards = ['GHS 100', 'GHS 75', 'GHS 50', 'GHS 30', 'GHS 20'];
+  tbody.innerHTML = ranked.map(([driverId, count], i) => {
+    const driver = allDrivers.find(d => d.id === driverId);
+    return `
+      <tr>
+        <td><span class="badge ${i === 0 ? 'gold' : 'grey'}">#${i + 1}</span></td>
+        <td>${driver?.full_name || 'Unknown driver'}</td>
+        <td style="font-family:var(--font-mono);">${count}</td>
+        <td style="color:var(--gold);">${awards[i]}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 // ── CHART ──
@@ -1122,9 +1363,14 @@ function buildChart() {
   const revenues = days.map((_, i) => {
     const d = new Date(now);
     d.setDate(d.getDate() - (6 - i));
-    return allBookings
-      .filter(b => b.status === 'completed' && new Date(b.created_at).toDateString() === d.toDateString())
+    const dayStr = d.toDateString();
+    const rideRev = allBookings
+      .filter(b => b.status === 'completed' && new Date(b.created_at).toDateString() === dayStr)
       .reduce((s, b) => s + (b.price || 0) * 0.15, 0);
+    const foodRev = allFoodOrdersForRevenue
+      .filter(o => o.status === 'delivered' && new Date(o.created_at).toDateString() === dayStr)
+      .reduce((s, o) => s + (o.subtotal || 0) * 0.10 + (o.delivery_fee || 0) * 0.15, 0);
+    return rideRev + foodRev;
   });
 
   if (revenueChart) revenueChart.destroy();
@@ -1188,19 +1434,58 @@ function renderLiveOps() {
   const tbody = document.getElementById('active-rides-table');
   if (!active.length) {
     tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:24px;">No active rides right now.</td></tr>';
-    return;
+  } else {
+    tbody.innerHTML = active.map(b => `
+      <tr>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">${b.id?.substring(0,8)}...</td>
+        <td>${b.client_name || '—'}</td>
+        <td style="font-size:12px;color:var(--text-dim);">${truncate(b.pickup, 25)}</td>
+        <td style="font-size:12px;color:var(--text-dim);">${truncate(b.dropoff, 25)}</td>
+        <td>${b.driver_id ? `<span class="badge green">Assigned</span>` : '<span class="badge grey">Searching</span>'}</td>
+        <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
+        <td>${statusBadge(b.status)}</td>
+      </tr>
+    `).join('');
   }
-  tbody.innerHTML = active.map(b => `
-    <tr>
-      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">${b.id?.substring(0,8)}...</td>
-      <td>${b.client_name || '—'}</td>
-      <td style="font-size:12px;color:var(--text-dim);">${truncate(b.pickup, 25)}</td>
-      <td style="font-size:12px;color:var(--text-dim);">${truncate(b.dropoff, 25)}</td>
-      <td>${b.driver_id ? `<span class="badge green">Assigned</span>` : '<span class="badge grey">Searching</span>'}</td>
-      <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
-      <td>${statusBadge(b.status)}</td>
-    </tr>
-  `).join('');
+
+  // Initialize the map once; subsequent calls (from the 8s poll) just clear
+  // and redraw markers, so the map itself doesn't reset zoom/pan every refresh.
+  if (!opsMap) {
+    opsMap = L.map('ops-map').setView([6.6, -0.9], 12); // defaults to the Eastern Region launch area
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(opsMap);
+  }
+  opsMapMarkers.forEach(m => opsMap.removeLayer(m));
+  opsMapMarkers = [];
+
+  const bounds = [];
+  active.forEach(b => {
+    // Prefer the driver's live position (accepted rides being tracked); fall
+    // back to the pickup point for rides still searching for a driver, so
+    // dispatchers can see where demand is clustering even before assignment.
+    const hasDriverPos = b.driver_lat && b.driver_lng;
+    const hasPickupPos = b.client_lat && b.client_lng;
+    if (!hasDriverPos && !hasPickupPos) return;
+    const lat = hasDriverPos ? b.driver_lat : b.client_lat;
+    const lng = hasDriverPos ? b.driver_lng : b.client_lng;
+    const color = hasDriverPos ? '#2DD4BF' : '#c9a84c';
+    const icon = L.divIcon({
+      html: `<div style="width:16px;height:16px;background:${color};border:3px solid #0d1117;border-radius:50%;box-shadow:0 0 6px ${color};"></div>`,
+      iconSize: [16, 16], className: '',
+    });
+    const marker = L.marker([lat, lng], { icon }).addTo(opsMap);
+    marker.bindPopup(`
+      <b>${b.client_name || 'Client'}</b><br>
+      ${hasDriverPos ? '🚗 Driver en route' : '🔍 Searching for driver'}<br>
+      ${truncate(b.pickup, 30)} → ${truncate(b.dropoff, 30)}<br>
+      GHS ${b.price}
+    `);
+    opsMapMarkers.push(marker);
+    bounds.push([lat, lng]);
+  });
+
+  if (bounds.length > 0) {
+    opsMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+  }
 }
 
 // ── BOOKINGS TABLE ──
@@ -1218,7 +1503,7 @@ function renderBookingsTable(list = allBookings) {
       <td style="font-size:12px;">${truncate(b.dropoff, 20)}</td>
       <td><span class="badge grey">${b.service || 'car'}</span></td>
       <td style="color:var(--gold);font-family:var(--font-mono);">GHS ${b.price}</td>
-      <td><span class="badge grey">${b.payment || 'cash'}</span></td>
+      <td><span class="badge grey">${b.payment_method || 'cash'}</span></td>
       <td>${statusBadge(b.status)}</td>
       <td style="color:var(--text-muted);font-size:12px;">${formatDate(b.created_at)}</td>
     </tr>
@@ -1247,7 +1532,7 @@ function renderDriversTable(list = allDrivers) {
     <tr>
       <td style="font-weight:600;">${d.full_name || '—'}</td>
       <td style="color:var(--text-dim);font-size:12px;">${d.email || '—'}</td>
-      <td style="color:var(--text-dim);font-size:12px;">${d.phone_number || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${d.phone || '—'}</td>
       <td>${d.is_verified ? '<span class="badge green">✓ Verified</span>' : '<span class="badge grey">Pending</span>'}</td>
       <td>${d.is_verified ? '<span class="badge green">Active</span>' : '<span class="badge grey">Not Verified</span>'}</td>
       <td>${d.suspended ? '<span class="badge red">Suspended</span>' : '<span class="badge green">Active</span>'}</td>
@@ -1260,7 +1545,7 @@ function renderDriversTable(list = allDrivers) {
 
 function filterDrivers() {
   const q = document.getElementById('driver-search').value.toLowerCase();
-  renderDriversTable(allDrivers.filter(d => [d.full_name, d.email, d.phone_number].some(v => v?.toLowerCase().includes(q))));
+  renderDriversTable(allDrivers.filter(d => [d.full_name, d.email, d.phone].some(v => v?.toLowerCase().includes(q))));
 }
 
 // ── CLIENTS TABLE ──
@@ -1274,7 +1559,7 @@ function renderClientsTable(list = allClients) {
     <tr>
       <td style="font-weight:600;">${c.full_name || '—'}</td>
       <td style="color:var(--text-dim);font-size:12px;">${c.email || '—'}</td>
-      <td style="color:var(--text-dim);font-size:12px;">${c.phone_number || '—'}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${c.phone || '—'}</td>
       <td style="color:var(--text-dim);font-size:12px;">${formatDate(c.created_at)}</td>
       <td>
         <button class="btn btn-ghost btn-sm" onclick="openUserAction('${c.id}','${c.full_name}','client')">Manage</button>
@@ -1323,40 +1608,6 @@ async function banUser(id, name) {
   alert(`${name} has been permanently banned.`);
 }
 
-// ── EARNINGS ──
-function calcEarnings() {
-  const completed = allBookings.filter(b => b.status === 'completed');
-  const total = completed.reduce((s, b) => s + (b.price || 0) * 0.15, 0);
-  const month = new Date().getMonth();
-  const monthRev = completed
-    .filter(b => new Date(b.created_at).getMonth() === month)
-    .reduce((s, b) => s + (b.price || 0) * 0.15, 0);
-  document.getElementById('earn-available').textContent = `GHS ${total.toFixed(2)}`;
-  document.getElementById('earn-total').textContent = `GHS ${total.toFixed(2)}`;
-  document.getElementById('earn-withdrawn').textContent = 'GHS 0.00';
-  document.getElementById('earn-month').textContent = `GHS ${monthRev.toFixed(2)}`;
-}
-
-// ── WITHDRAWAL WITH OTP ──
-function initiateWithdraw() {
-  const amount = parseFloat(document.getElementById('withdraw-amount').value);
-  if (!amount || amount < 1) { alert('Please enter a valid amount.'); return; }
-  otpAction = () => processWithdraw(amount);
-  document.getElementById('withdraw-modal').classList.remove('open');
-  document.getElementById('otp-desc').textContent = amount >= 5000
-    ? `GHS ${amount.toFixed(2)} withdrawal requires DOUBLE OTP. Enter the FIRST code sent to your phone.`
-    : `Enter the 6-digit code sent to your registered phone to confirm withdrawal of GHS ${amount.toFixed(2)}.`;
-  openOtp();
-}
-
-function processWithdraw(amount) {
-  alert(`✅ Withdrawal of GHS ${amount.toFixed(2)} via ${document.getElementById('withdraw-method').value} has been initiated.`);
-  const tbody = document.getElementById('withdrawal-history');
-  const row = `<tr><td>${new Date().toLocaleDateString()}</td><td style="color:var(--gold);">GHS ${amount.toFixed(2)}</td><td>${document.getElementById('withdraw-method').value}</td><td><span class="badge green">Processed</span></td></tr>`;
-  if (tbody.innerHTML.includes('No withdrawals')) tbody.innerHTML = row;
-  else tbody.innerHTML = row + tbody.innerHTML;
-}
-
 // ── OTP ──
 function openOtp() {
   for (let i = 0; i < 6; i++) document.getElementById('otp' + i).value = '';
@@ -1386,52 +1637,265 @@ function verifyOtp() {
 // ── CHANGE COMMISSION ──
 function changeCommission() {
   const rate = document.getElementById('commission-rate').value;
-  otpAction = () => alert(`Commission rate updated to ${rate}%.`);
+  otpAction = async () => {
+    const result = await callUpdateSettings([{ key: 'platform_commission', value: parseFloat(rate) / 100 }]);
+    alert(result.success ? `Commission rate updated to ${rate}%.` : `⚠️ Failed to update: ${result.error || 'unknown error'}`);
+  };
   document.getElementById('otp-desc').textContent = `OTP required to change commission rate to ${rate}%.`;
   openOtp();
 }
 
 function saveCode(type) {
-  otpAction = () => alert(`${type === 'founder' ? 'Founder' : 'Staff'} code updated successfully.`);
+  otpAction = async () => {
+    let settings;
+    if (type === 'founder') {
+      const code = document.getElementById('founder-code').value.trim();
+      if (!code) { alert('Please enter a code.'); return; }
+      settings = [{ key: 'founder_code', value: 100, text_value: code }];
+    } else {
+      const code = document.getElementById('staff-code').value.trim();
+      const discount = parseFloat(document.getElementById('staff-discount').value);
+      if (!code || isNaN(discount)) { alert('Please enter a valid code and discount.'); return; }
+      settings = [{ key: 'staff_code', value: discount, text_value: code }];
+    }
+    const result = await callUpdateSettings(settings);
+    alert(result.success
+      ? `${type === 'founder' ? 'Founder' : 'Staff'} code updated successfully.`
+      : `⚠️ Failed to update: ${result.error || 'unknown error'}`);
+  };
   document.getElementById('otp-desc').textContent = `OTP required to change the ${type} code.`;
   openOtp();
 }
 
+// ── SURGE + FARE FLOOR SETTINGS ──
+// Fallback defaults match the blueprint values baked into the app
+const SURGE_DEFAULTS = {
+  surge_threshold_moderate: 3, surge_multiplier_moderate: 1.1,
+  surge_threshold_busy: 5, surge_multiplier_busy: 1.25,
+  surge_threshold_high: 10, surge_multiplier_high: 1.5,
+};
+const FARE_FLOOR_DEFAULTS = {
+  car_min_fare: 20, tuktuk_min_fare: 10, motorbike_min_fare: 15,
+};
+// Matches the multipliers previously hardcoded in the mobile app — now
+// admin-editable, with these as the fallback if never customized.
+const NIGHT_DEFAULTS = {
+  night_mult_evening: 1.2, night_mult_night: 1.5,
+  night_mult_late: 2.0, night_mult_early: 1.5,
+};
+
+async function loadSystemSettings() {
+  const data = await sb('system_settings?select=*');
+  const rows = Array.isArray(data) ? data : [];
+  const valueMap = {};
+  const textMap = {};
+  rows.forEach(row => { valueMap[row.key] = row.value; textMap[row.key] = row.text_value; });
+
+  // Commission
+  if (valueMap.platform_commission != null) {
+    document.getElementById('commission-rate').value = (valueMap.platform_commission * 100).toFixed(0);
+  }
+
+  // Founder / Staff codes (text_value holds the code string, value holds the discount %)
+  if (textMap.founder_code) document.getElementById('founder-code').value = textMap.founder_code;
+  if (textMap.staff_code) document.getElementById('staff-code').value = textMap.staff_code;
+  if (valueMap.staff_code != null) document.getElementById('staff-discount').value = valueMap.staff_code;
+
+  // Surge — use DB value if present, otherwise fall back to blueprint default
+  Object.keys(SURGE_DEFAULTS).forEach(key => {
+    const el = document.getElementById(key.replace(/_/g, '-'));
+    if (el) el.value = valueMap[key] != null ? valueMap[key] : SURGE_DEFAULTS[key];
+  });
+
+  // Fare floors
+  Object.keys(FARE_FLOOR_DEFAULTS).forEach(key => {
+    const el = document.getElementById(key.replace(/_/g, '-'));
+    if (el) el.value = valueMap[key] != null ? valueMap[key] : FARE_FLOOR_DEFAULTS[key];
+  });
+
+  // Night pricing multipliers
+  Object.keys(NIGHT_DEFAULTS).forEach(key => {
+    const el = document.getElementById(key.replace(/_/g, '-'));
+    if (el) el.value = valueMap[key] != null ? valueMap[key] : NIGHT_DEFAULTS[key];
+  });
+
+  // Birthday / Maintenance mode toggles reflect live server state
+  if (valueMap.birthday_mode_active != null) {
+    birthdayOn = valueMap.birthday_mode_active === 1;
+    const tog = document.getElementById('birthday-toggle');
+    tog.classList.toggle('on', birthdayOn);
+    tog.nextElementSibling.textContent = birthdayOn ? 'Birthday mode is ON — tipping button active for 24 hours' : 'Birthday mode is OFF';
+  }
+  if (valueMap.maintenance_mode_active != null) {
+    maintenanceOn = valueMap.maintenance_mode_active === 1;
+    const tog = document.getElementById('maintenance-toggle');
+    tog.classList.toggle('on', maintenanceOn);
+    tog.nextElementSibling.textContent = maintenanceOn ? '🔧 Maintenance mode is ON — users see updating screen' : 'Maintenance mode is OFF';
+  }
+}
+
+async function saveSurgeSettings() {
+  const keys = Object.keys(SURGE_DEFAULTS);
+  const settings = keys.map(key => ({
+    key,
+    value: parseFloat(document.getElementById(key.replace(/_/g, '-')).value)
+  }));
+
+  if (settings.some(s => isNaN(s.value) || s.value <= 0)) {
+    alert('Please enter valid positive numbers for all surge fields.');
+    return;
+  }
+  // Sanity check: thresholds should ascend moderate < busy < high
+  const byKey = Object.fromEntries(settings.map(s => [s.key, s.value]));
+  if (!(byKey.surge_threshold_moderate < byKey.surge_threshold_busy && byKey.surge_threshold_busy < byKey.surge_threshold_high)) {
+    alert('Thresholds must increase: Moderate < Busy < High Demand.');
+    return;
+  }
+
+  const result = await callUpdateSettings(settings);
+  alert(result.success
+    ? '✅ Surge settings updated. Takes effect on the next fare calculation in the app.'
+    : `⚠️ Failed to update: ${result.error || 'one or more settings failed to save'}`);
+}
+
+async function saveFareFloors() {
+  const keys = Object.keys(FARE_FLOOR_DEFAULTS);
+  const settings = keys.map(key => ({
+    key,
+    value: parseFloat(document.getElementById(key.replace(/_/g, '-')).value)
+  }));
+
+  if (settings.some(s => isNaN(s.value) || s.value <= 0)) {
+    alert('Please enter valid positive numbers for all fare floors.');
+    return;
+  }
+
+  const result = await callUpdateSettings(settings);
+  alert(result.success
+    ? '✅ Fare floors updated. Takes effect on the next fare calculation in the app.'
+    : `⚠️ Failed to update: ${result.error || 'one or more settings failed to save'}`);
+}
+
+async function saveNightSettings() {
+  const keys = Object.keys(NIGHT_DEFAULTS);
+  const settings = keys.map(key => ({
+    key,
+    value: parseFloat(document.getElementById(key.replace(/_/g, '-')).value)
+  }));
+
+  if (settings.some(s => isNaN(s.value) || s.value < 1)) {
+    alert('Please enter valid numbers (1.0 or higher — a multiplier below 1x would discount night rides, which isn\'t the intent here) for all night pricing fields.');
+    return;
+  }
+
+  const result = await callUpdateSettings(settings);
+  alert(result.success
+    ? '✅ Night pricing updated. Takes effect on the next fare calculation in the app.'
+    : `⚠️ Failed to update: ${result.error || 'one or more settings failed to save'}`);
+}
+
 // ── NOTIFICATIONS ──
-function sendNotification() {
+const SEND_NOTIFICATION_URL = `${SUPABASE_URL}/functions/v1/send-notification`;
+const UPDATE_SETTINGS_URL = `${SUPABASE_URL}/functions/v1/update-settings`;
+
+async function callUpdateSettings(settings) {
+  try {
+    const res = await fetch(UPDATE_SETTINGS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ settings })
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('Settings update failed:', e);
+    return { error: String(e) };
+  }
+}
+
+async function sendViaEdgeFunction(title, body, target) {
+  try {
+    const res = await fetch(SEND_NOTIFICATION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ title, body, target })
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('Notification send failed:', e);
+    return { error: String(e) };
+  }
+}
+
+async function sendNotification() {
   const title = document.getElementById('notif-title').value;
   const body = document.getElementById('notif-body').value;
   const target = document.getElementById('notif-target').value;
   if (!title || !body) { alert('Please enter title and message.'); return; }
   document.getElementById('notif-modal').classList.remove('open');
-  alert(`✅ Notification sent to ${target === 'all' ? 'all users' : target + ' only'}:\n"${title}" — ${body}`);
+  const result = await sendViaEdgeFunction(title, body, target);
+  if (result.error) {
+    alert(`⚠️ Could not send notification: ${result.error}`);
+  } else {
+    alert(result.sent > 0
+      ? `✅ Notification sent to ${result.sent} device(s) (${target === 'all' ? 'all users' : target + ' only'}):\n"${title}" — ${body}`
+      : `⚠️ No registered devices found for "${target === 'all' ? 'all users' : target}" (${result.matched || 0} matching profile(s), none with a valid push token).`);
+  }
 }
 
-function sendNotification2() {
+async function sendNotification2() {
   const title = document.getElementById('notif2-title').value;
   const body = document.getElementById('notif2-body').value;
   const target = document.getElementById('notif2-target').value;
   if (!title || !body) { alert('Please enter title and message.'); return; }
-  alert(`✅ Notification sent to ${target === 'all' ? 'all users' : target + ' only'}:\n"${title}" — ${body}`);
+  const result = await sendViaEdgeFunction(title, body, target);
+  if (result.error) {
+    alert(`⚠️ Could not send notification: ${result.error}`);
+  } else {
+    alert(result.sent > 0
+      ? `✅ Notification sent to ${result.sent} device(s) (${target === 'all' ? 'all users' : target + ' only'}):\n"${title}" — ${body}`
+      : `⚠️ No registered devices found for "${target === 'all' ? 'all users' : target}" (${result.matched || 0} matching profile(s), none with a valid push token).`);
+  }
   document.getElementById('notif2-title').value = '';
   document.getElementById('notif2-body').value = '';
 }
 
 // ── BIRTHDAY MODE ──
-function toggleBirthday() {
+async function toggleBirthday() {
   birthdayOn = !birthdayOn;
   const tog = document.getElementById('birthday-toggle');
+  const label = tog.nextElementSibling;
   tog.classList.toggle('on', birthdayOn);
-  tog.nextElementSibling.textContent = birthdayOn ? 'Birthday mode is ON — tipping button active for 24 hours' : 'Birthday mode is OFF';
-  if (birthdayOn) alert('🎂 Birthday mode activated! All users will see a tipping button for 24 hours.');
+  label.textContent = birthdayOn ? 'Birthday mode is ON — banner active for 24 hours' : 'Birthday mode is OFF';
+
+  const result = await callUpdateSettings([{ key: 'birthday_mode_active', value: birthdayOn ? 1 : 0 }]);
+  if (!result.success) {
+    // Roll back the UI if the save failed
+    birthdayOn = !birthdayOn;
+    tog.classList.toggle('on', birthdayOn);
+    label.textContent = birthdayOn ? 'Birthday mode is ON — banner active for 24 hours' : 'Birthday mode is OFF';
+    alert(`⚠️ Failed to save: ${result.error || 'unknown error'}`);
+    return;
+  }
+  if (birthdayOn) alert('🎂 Birthday mode activated! All users will see a celebratory banner for 24 hours.');
 }
 
 // ── MAINTENANCE MODE ──
-function toggleMaintenance() {
+async function toggleMaintenance() {
   maintenanceOn = !maintenanceOn;
   const tog = document.getElementById('maintenance-toggle');
+  const label = tog.nextElementSibling;
   tog.classList.toggle('on', maintenanceOn);
-  tog.nextElementSibling.textContent = maintenanceOn ? '🔧 Maintenance mode is ON — users see updating screen' : 'Maintenance mode is OFF';
+  label.textContent = maintenanceOn ? '🔧 Maintenance mode is ON — users see updating screen' : 'Maintenance mode is OFF';
+
+  const result = await callUpdateSettings([{ key: 'maintenance_mode_active', value: maintenanceOn ? 1 : 0 }]);
+  if (!result.success) {
+    maintenanceOn = !maintenanceOn;
+    tog.classList.toggle('on', maintenanceOn);
+    label.textContent = maintenanceOn ? '🔧 Maintenance mode is ON — users see updating screen' : 'Maintenance mode is OFF';
+    alert(`⚠️ Failed to save: ${result.error || 'unknown error'}`);
+    return;
+  }
+  if (maintenanceOn) alert('🔧 Maintenance mode activated! Users will see an updating screen until you turn this off.');
 }
 
 // ── HELPERS ──
@@ -1445,11 +1909,372 @@ function statusBadge(s) {
 // ── KYC REVIEW ──
 let allKYCDrivers = [];
 
+// ── SOS ALERTS ──
+let allSOSAlerts = [];
+
+async function loadSOSAlerts() {
+  const data = await sb('sos_alerts?select=*&order=created_at.desc&limit=100');
+  allSOSAlerts = Array.isArray(data) ? data : [];
+  renderSOSCards();
+  refreshSOSBadge();
+}
+
+function renderSOSCards() {
+  const container = document.getElementById('sos-cards');
+  if (!allSOSAlerts.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">No SOS alerts. All clear.</div>`;
+    return;
+  }
+  container.innerHTML = allSOSAlerts.map(a => `
+    <div class="card" style="border-color:${a.status === 'active' ? 'var(--red)' : 'var(--border)'}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+        <div>
+          <div style="font-weight:700;font-size:15px;">${a.user_name || 'Unknown user'}</div>
+          <div style="color:var(--text-dim);font-size:12px;">${a.user_phone || 'No phone on file'}</div>
+        </div>
+        <span class="badge ${a.status === 'active' ? 'red' : 'green'}">${a.status === 'active' ? '🚨 ACTIVE' : '✓ Resolved'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Triggered: ${new Date(a.created_at).toLocaleString()}</div>
+      ${a.lat && a.lng ? `
+        <a href="https://www.google.com/maps?q=${a.lat},${a.lng}" target="_blank" class="btn btn-gold btn-sm" style="margin-top:8px;display:inline-block;text-decoration:none;">📍 Open Location in Maps</a>
+      ` : `<div style="font-size:12px;color:var(--text-muted);">No location captured</div>`}
+      <div style="margin-top:12px;">
+        ${a.status === 'active' ? `<button class="btn btn-green btn-sm" onclick="resolveSOSAlert('${a.id}')">Mark Resolved</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function resolveSOSAlert(id) {
+  if (!confirm('Confirm this emergency has been resolved (person is safe / handled)?')) return;
+  await sb(`sos_alerts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) });
+  await loadSOSAlerts();
+}
+
+// ── RESTAURANT APPROVAL ──
+let allRestaurants = [];
+
+async function loadRestaurants() {
+  const data = await sb('restaurants?select=*&order=created_at.desc');
+  allRestaurants = Array.isArray(data) ? data : [];
+  renderRestaurantCards(allRestaurants);
+  refreshRestaurantBadge();
+}
+
+function renderRestaurantCards(list) {
+  const filter = document.getElementById('restaurant-filter').value;
+  const q = document.getElementById('restaurant-search').value.toLowerCase();
+  const filtered = list.filter(r => {
+    const matchFilter = !filter || (filter === 'pending' && !r.is_approved) || (filter === 'approved' && r.is_approved);
+    const matchQ = !q || (r.business_name || '').toLowerCase().includes(q);
+    return matchFilter && matchQ;
+  });
+  const container = document.getElementById('restaurant-cards');
+  if (!filtered.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">No restaurants found.</div>`;
+    return;
+  }
+  container.innerHTML = filtered.map(r => `
+    <div class="card" style="border-color:${r.is_approved ? 'var(--green)' : 'var(--border)'}">
+      ${r.restaurant_photo ? `<img src="${r.restaurant_photo}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-bottom:12px;">` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div style="font-weight:700;font-size:15px;">${r.business_name}</div>
+        <span class="badge ${r.is_approved ? 'green' : 'gold'}">${r.is_approved ? '✓ Approved' : 'Pending'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Status: ${r.is_open ? 'Open for orders' : 'Closed'}</div>
+      <button class="btn btn-gold btn-sm" style="width:100%;margin-bottom:8px;" onclick="viewKycDocuments('${r.owner_id}')">📄 View Documents</button>
+      <div style="display:flex;gap:8px;">
+        ${!r.is_approved ? `<button class="btn btn-green btn-sm" onclick="approveRestaurant('${r.id}','${r.owner_id}','${r.business_name.replace(/'/g, "\\'")}')">✓ Approve</button>` : ''}
+        ${r.is_approved ? `<button class="btn btn-ghost btn-sm" onclick="rejectRestaurant('${r.id}','${r.owner_id}','${r.business_name.replace(/'/g, "\\'")}')">Revoke Approval</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterRestaurants() { renderRestaurantCards(allRestaurants); }
+
+async function approveRestaurant(id, ownerId, name) {
+  await sb(`restaurants?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_approved: true }) });
+  // Also mark the owner's profile as verified — this is what the app checks at login
+  // to decide whether they see the "under review" screen or their restaurant dashboard.
+  if (ownerId) {
+    await sb(`profiles?id=eq.${ownerId}`, { method: 'PATCH', body: JSON.stringify({ is_verified: true, suspended: false, suspension_reason: null }) });
+  }
+  alert(`✅ ${name} has been approved and can now open for orders.`);
+  await loadRestaurants();
+}
+
+async function rejectRestaurant(id, ownerId, name) {
+  if (!confirm(`Revoke approval for ${name}? They will disappear from client browsing immediately.`)) return;
+  await sb(`restaurants?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_approved: false, is_open: false }) });
+  if (ownerId) {
+    await sb(`profiles?id=eq.${ownerId}`, { method: 'PATCH', body: JSON.stringify({ is_verified: false }) });
+  }
+  alert(`${name}'s approval has been revoked.`);
+  await loadRestaurants();
+}
+
+// ── FOOD ORDERS ──
+let allFoodOrders = [];
+
+async function loadFoodOrders() {
+  const data = await sb('food_orders?select=*&order=created_at.desc&limit=200');
+  allFoodOrders = Array.isArray(data) ? data : [];
+  renderFoodOrdersTable();
+}
+
+function renderFoodOrdersTable() {
+  const filter = document.getElementById('foodorder-filter').value;
+  const q = document.getElementById('foodorder-search').value.toLowerCase();
+  const filtered = allFoodOrders.filter(o => {
+    const matchFilter = !filter || o.status === filter;
+    const matchQ = !q || [o.client_name, o.restaurant_name].some(v => (v || '').toLowerCase().includes(q));
+    return matchFilter && matchQ;
+  });
+  const statusColors = { pending: 'gold', preparing: 'gold', ready_for_pickup: 'green', rider_assigned: 'green', picked_up: 'green', delivered: 'green', cancelled: 'red' };
+  const tbody = document.getElementById('foodorder-rows');
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:40px;">No food orders found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(o => `
+    <tr>
+      <td>${o.client_name || '—'}</td>
+      <td>${o.restaurant_name || '—'}</td>
+      <td><span class="badge ${statusColors[o.status] || 'gold'}">${(o.status || '').replace(/_/g, ' ')}</span></td>
+      <td>GHS ${o.total}</td>
+      <td>${o.payment}</td>
+      <td>${new Date(o.created_at).toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+function filterFoodOrders() { renderFoodOrdersTable(); }
+
+// ── REFUNDS ──
+let allRefunds = [];
+const PROCESS_REFUND_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/process-refund';
+
+// ── PLATFORM REVENUE ──
+const GET_PLATFORM_BALANCE_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/get-platform-balance';
+const PROCESS_FOUNDER_WITHDRAWAL_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/process-founder-withdrawal';
+let platformRevenueAvailable = 0;
+
+async function loadPlatformRevenue() {
+  document.getElementById('pr-paystack-balance').textContent = 'Loading...';
+  try {
+    const res = await fetch(GET_PLATFORM_BALANCE_URL);
+    const data = await res.json();
+    document.getElementById('pr-paystack-balance').textContent = `GHS ${data.paystackBalance?.toFixed(2) ?? '—'}`;
+    document.getElementById('pr-driver-wallets').textContent = `GHS ${data.totalDriverWallets?.toFixed(2) ?? '—'}`;
+    document.getElementById('pr-available').textContent = `GHS ${data.availableToFounder?.toFixed(2) ?? '—'}`;
+    platformRevenueAvailable = data.availableToFounder || 0;
+  } catch (e) {
+    document.getElementById('pr-paystack-balance').textContent = 'Error';
+    console.log('Could not load platform balance:', e.message);
+  }
+
+  const history = await sb('founder_withdrawals?select=*&order=created_at.desc&limit=50');
+  const rows = Array.isArray(history) ? history : [];
+  const tbody = document.getElementById('pr-history-table');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">No withdrawals yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(w => `
+    <tr>
+      <td style="color:var(--gold);">GHS ${w.amount}</td>
+      <td>${w.momo_provider || '—'}</td>
+      <td><span class="badge ${w.status === 'success' ? 'green' : w.status === 'failed' ? 'red' : 'gold'}">${w.status}</span></td>
+      <td style="font-size:12px;color:var(--text-muted);">${new Date(w.created_at).toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+async function withdrawPlatformRevenue() {
+  const amount = parseFloat(document.getElementById('pr-amount').value);
+  const provider = document.getElementById('pr-provider').value;
+  const momoNumber = document.getElementById('pr-momo-number').value.trim();
+
+  if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+  if (!momoNumber) { alert('Enter a Mobile Money number.'); return; }
+  if (amount > platformRevenueAvailable) {
+    alert(`Only GHS ${platformRevenueAvailable.toFixed(2)} is actually available. Refresh first if you think this is out of date.`);
+    return;
+  }
+  if (!confirm(`Withdraw GHS ${amount} to ${provider.toUpperCase()} ${momoNumber}? This triggers a REAL Paystack transfer.`)) return;
+
+  try {
+    const res = await fetch(PROCESS_FOUNDER_WITHDRAWAL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, momoProvider: provider, momoNumber }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ GHS ${data.amount} is on its way.`);
+      document.getElementById('pr-amount').value = '';
+    } else {
+      alert(`❌ ${data.message || 'Withdrawal failed.'}`);
+    }
+  } catch (e) {
+    alert('❌ Could not reach the withdrawal service: ' + e.message);
+  }
+  await loadPlatformRevenue();
+}
+
+async function loadRefunds() {
+  const data = await sb('refund_requests?select=*&order=created_at.desc&limit=200');
+  allRefunds = Array.isArray(data) ? data : [];
+  renderRefundsTable();
+  refreshRefundBadge();
+}
+
+function renderRefundsTable() {
+  const tbody = document.getElementById('refunds-table');
+  const pending = allRefunds.filter(r => r.status === 'pending');
+  if (!pending.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-muted);text-align:center;padding:24px;">No pending refund requests.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = pending.map(r => `
+    <tr>
+      <td style="font-family:var(--font-mono);font-size:11px;">${(r.booking_id || r.food_order_id || '').slice(0, 8)}</td>
+      <td>${r.client_name || '—'}</td>
+      <td style="color:var(--gold);">GHS ${r.amount}</td>
+      <td style="max-width:200px;font-size:12px;">${r.reason}${r.evidence_photo ? ` <a href="${r.evidence_photo}" target="_blank">📷</a>` : ''}</td>
+      <td style="font-size:12px;color:var(--text-muted);">${new Date(r.created_at).toLocaleDateString()}</td>
+      <td>
+        <button class="btn btn-green btn-sm" onclick="approveRefund('${r.id}')">✓ Refund</button>
+        <button class="btn btn-red btn-sm" onclick="rejectRefund('${r.id}')">✗ Decline</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function refreshRefundBadge() {
+  const count = allRefunds.filter(r => r.status === 'pending').length;
+  const badge = document.getElementById('refund-badge');
+  if (badge) { badge.textContent = count; badge.style.display = count === 0 ? 'none' : 'inline-block'; }
+}
+
+async function approveRefund(id) {
+  if (!confirm('This will trigger a REAL refund via Paystack, reversing the original charge. Continue?')) return;
+  try {
+    const res = await fetch(PROCESS_REFUND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refundRequestId: id }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ Refunded GHS ${data.amount} via Paystack.`);
+    } else {
+      alert(`❌ Refund failed: ${data.message || data.error || 'Unknown error'}`);
+    }
+  } catch (e) {
+    alert('❌ Could not reach the refund service: ' + e.message);
+  }
+  await loadRefunds();
+}
+
+async function rejectRefund(id) {
+  const reason = prompt('Reason for declining this refund (shown to the client):');
+  if (!reason) return;
+  await sb(`refund_requests?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'rejected', admin_notes: reason, resolved_at: new Date().toISOString() }) });
+  alert('Refund request declined.');
+  await loadRefunds();
+}
+
+// ── LOST & FOUND ──
+let allLostItems = [];
+
+async function loadLostFound() {
+  const data = await sb('lost_items?select=*&order=created_at.desc&limit=100');
+  allLostItems = Array.isArray(data) ? data : [];
+  renderLostFoundCards();
+  refreshLostFoundBadge();
+}
+
+function renderLostFoundCards() {
+  const filter = document.getElementById('lostfound-filter').value;
+  const q = document.getElementById('lostfound-search').value.toLowerCase();
+  const filtered = allLostItems.filter(i => {
+    const matchFilter = !filter || i.status === filter;
+    const matchQ = !q || (i.client_name || '').toLowerCase().includes(q);
+    return matchFilter && matchQ;
+  });
+  const container = document.getElementById('lostfound-cards');
+  if (!filtered.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">No lost item reports.</div>`;
+    return;
+  }
+  container.innerHTML = filtered.map(i => `
+    <div class="card">
+      ${i.item_photo ? `<img src="${i.item_photo}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;margin-bottom:12px;">` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div style="font-weight:700;font-size:14px;">${i.item_description || 'No description'}</div>
+        <span class="badge ${i.status === 'found' ? 'green' : 'gold'}">${i.status === 'found' ? '✓ Found' : 'Awaiting'}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);">Reported by ${i.client_name || 'Unknown'}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${new Date(i.created_at).toLocaleString()}</div>
+    </div>
+  `).join('');
+}
+
+function filterLostFound() { renderLostFoundCards(); }
+
+async function refreshLostFoundBadge() {
+  const data = await sb("lost_items?select=id&status=eq.reported");
+  const count = Array.isArray(data) ? data.length : 0;
+  const badge = document.getElementById('lostfound-badge');
+  if (badge) { badge.textContent = count; badge.style.display = count === 0 ? 'none' : 'inline-block'; }
+}
+
+async function viewKycDocuments(ownerId) {
+  document.getElementById('doc-modal-title').textContent = 'Documents';
+  document.getElementById('doc-modal-body').innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:20px;grid-column:1/-1;">Loading documents...</div>`;
+  document.getElementById('doc-modal').classList.add('open');
+
+  const results = await sb(`profiles?id=eq.${ownerId}&select=*`);
+  const driver = Array.isArray(results) ? results[0] : null;
+  if (!driver) {
+    document.getElementById('doc-modal-body').innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:20px;grid-column:1/-1;">Could not load this applicant's profile.</div>`;
+    return;
+  }
+  document.getElementById('doc-modal-title').textContent = `${driver.full_name || 'Applicant'} — Documents`;
+
+  const docs = [
+    { label: 'Ghana Card', path: driver.kyc_id_photo_path },
+    { label: "Driver's License (Front)", path: driver.kyc_license_front_path },
+    { label: "Driver's License (Back)", path: driver.kyc_license_back_path },
+    { label: 'Vehicle Photo', path: driver.kyc_vehicle_photo_path },
+    { label: 'Live Selfie', path: driver.kyc_selfie_path },
+    { label: 'Food Safety Certificate', path: driver.kyc_food_safety_cert_path },
+  ].filter(d => d.path);
+
+  if (!docs.length) {
+    document.getElementById('doc-modal-body').innerHTML = `<div style="color:var(--text-muted);text-align:center;padding:20px;grid-column:1/-1;">No documents on file for this applicant.</div>`;
+    return;
+  }
+
+  const signedDocs = await Promise.all(docs.map(async d => ({ ...d, url: await getSignedDocUrl('kyc-documents', d.path) })));
+
+  document.getElementById('doc-modal-body').innerHTML = signedDocs.map(d => `
+    <div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:700;text-transform:uppercase;">${d.label}</div>
+      ${d.url
+        ? `<a href="${d.url}" target="_blank"><img src="${d.url}" style="width:100%;height:140px;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>`
+        : `<div style="height:140px;display:flex;align-items:center;justify-content:center;background:var(--bg);border-radius:8px;color:var(--red);font-size:12px;">Failed to load</div>`}
+    </div>
+  `).join('');
+}
+
 async function loadKYCDrivers() {
-  const data = await sb('profiles?select=*&role=eq.car_driver,profiles?select=*&role=eq.tuktuk_driver');
-  // Load all non-client profiles
-  const all = await sb('profiles?select=*&neq.role=client&order=created_at.desc');
-  allKYCDrivers = Array.isArray(all) ? all.filter(p => p.role !== 'client') : [];
+  // role=neq.client is the correct PostgREST syntax (previously written as
+  // neq.role=client, which Supabase rejects — making this page silently empty)
+  const all = await sb('profiles?select=*&role=neq.client&order=created_at.desc');
+  allKYCDrivers = Array.isArray(all) ? all : [];
   renderKYCCards(allKYCDrivers);
   // Update badge with pending count
   const pending = allKYCDrivers.filter(d => !d.is_verified && !d.suspended).length;
@@ -1464,7 +2289,7 @@ function renderKYCCards(drivers) {
     const matchFilter = !filter ||
       (filter === 'pending' && !d.is_verified) ||
       (filter === 'verified' && d.is_verified);
-    const matchQ = !q || [d.full_name, d.email, d.phone_number].some(v => v?.toLowerCase().includes(q));
+    const matchQ = !q || [d.full_name, d.email, d.phone].some(v => v?.toLowerCase().includes(q));
     return matchFilter && matchQ;
   });
 
@@ -1480,7 +2305,7 @@ function renderKYCCards(drivers) {
         <div>
           <div style="font-weight:700;font-size:15px;">${d.full_name || '—'}</div>
           <div style="color:var(--text-dim);font-size:12px;">${d.email || '—'}</div>
-          <div style="color:var(--text-dim);font-size:12px;">${d.phone_number || '—'}</div>
+          <div style="color:var(--text-dim);font-size:12px;">${d.phone || '—'}</div>
         </div>
         <span class="badge ${d.is_verified ? 'green' : d.suspended ? 'red' : 'gold'}">
           ${d.is_verified ? '✓ Verified' : d.suspended ? 'Suspended' : 'Pending'}
@@ -1508,10 +2333,7 @@ function renderKYCCards(drivers) {
       ` : ''}
 
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Document Photos</div>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;background:var(--bg);padding:8px;border-radius:6px;">
-        Photos stored in Supabase Storage under driver_docs bucket.<br>
-        Check: <span style="color:var(--gold);font-family:var(--font-mono);">driver_docs/${d.id}/</span>
-      </div>
+      <button class="btn btn-gold btn-sm" style="width:100%;margin-bottom:4px;" onclick="viewKycDocuments('${d.id}')">📄 View Documents</button>
 
       <div style="display:flex;gap:8px;margin-top:4px;">
         ${!d.is_verified && !d.suspended ? `
@@ -1621,7 +2443,8 @@ async function createPromoCode() {
     document.getElementById('new-promo-desc').value = '';
     await loadPromoCodes();
   } else {
-    alert('Error creating promo code. The code may already exist.');
+    console.log('Promo code creation failed. Server response:', result);
+    alert('Error creating promo code: ' + (result?.message || JSON.stringify(result)));
   }
 }
 

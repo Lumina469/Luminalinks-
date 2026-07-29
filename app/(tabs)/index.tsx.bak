@@ -3,7 +3,7 @@ import { WebView } from "react-native-webview";
 import { supabase } from '../../lib/supabase';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, Switch, Image, Linking, Animated, RefreshControl
+  TextInput, Alert, Switch, Image, Linking, Animated
 } from "react-native";
 import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,11 +11,6 @@ import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import * as SplashScreen from "expo-splash-screen";
-import { useFonts, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from "@expo-google-fonts/manrope";
-import * as Haptics from "expo-haptics";
-
-SplashScreen.preventAutoHideAsync();
 
 // Custom illustrated service icons (replacing the generic vector icons)
 const ICON_CAR = require("../../assets/icons/car.png");
@@ -78,18 +73,6 @@ const getDist = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-// Wrapped in try/catch since haptics can fail silently on some devices/emulators
-// without haptic hardware — never worth crashing or blocking a real action over.
-const haptic = (style: "light" | "medium" | "success" | "warning" | "error" = "light") => {
-  try {
-    if (style === "success") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    else if (style === "warning") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    else if (style === "error") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    else if (style === "medium") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  } catch (e) { /* no haptics hardware — silently ignore */ }
 };
 
 const timeAgo = (isoString: string) => {
@@ -159,9 +142,9 @@ const loadPlatformSettings = async () => {
 const getNightMultiplier = () => {
   const hour = new Date().getHours();
   if (hour >= 6 && hour < 20) return { multiplier: 1.0, label: "Standard Hours", color: "#2DD4BF" };
-  if (hour >= 20 && hour < 22) return { multiplier: 1.2, label: "Evening x1.2", color: "#F5A623" };
+  if (hour >= 20 && hour < 22) return { multiplier: 1.2, label: "Evening x1.2", color: "#ff9800" };
   if (hour >= 22 && hour < 24) return { multiplier: 1.5, label: "Night x1.5", color: "#f5a623" };
-  if (hour >= 0 && hour < 4) return { multiplier: 2.0, label: "Late Night x2.0", color: "#F87171" };
+  if (hour >= 0 && hour < 4) return { multiplier: 2.0, label: "Late Night x2.0", color: "#f44336" };
   if (hour >= 4 && hour < 6) return { multiplier: 1.5, label: "Early Morning x1.5", color: "#f5a623" };
   return { multiplier: 1.0, label: "Standard Hours", color: "#2DD4BF" };
 };
@@ -189,8 +172,8 @@ const calcFare = (km: number, service: string = "car", pendingCount: number = 0)
 };
 
 const getSurgeLabel = (pendingCount: number) => {
-  if (pendingCount >= PLATFORM_SETTINGS.surge_threshold_high) return { label: `High Demand x${PLATFORM_SETTINGS.surge_multiplier_high}`, color: "#F87171" };
-  if (pendingCount >= PLATFORM_SETTINGS.surge_threshold_busy) return { label: `Busy x${PLATFORM_SETTINGS.surge_multiplier_busy}`, color: "#F5A623" };
+  if (pendingCount >= PLATFORM_SETTINGS.surge_threshold_high) return { label: `High Demand x${PLATFORM_SETTINGS.surge_multiplier_high}`, color: "#f44336" };
+  if (pendingCount >= PLATFORM_SETTINGS.surge_threshold_busy) return { label: `Busy x${PLATFORM_SETTINGS.surge_multiplier_busy}`, color: "#ff9800" };
   if (pendingCount >= PLATFORM_SETTINGS.surge_threshold_moderate) return { label: `Moderate x${PLATFORM_SETTINGS.surge_multiplier_moderate}`, color: "#f5a623" };
   return { label: "Normal Price", color: "#2DD4BF" };
 };
@@ -231,6 +214,7 @@ const getTimeSlots = (dayKey: string) => {
 // ============================================================
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
     shouldShowBanner: true,
@@ -304,7 +288,7 @@ const LinkMark = ({ size = 26 }: { size?: number }) => {
 const Wordmark = ({ fontSize = 20, showMark = true }: { fontSize?: number; showMark?: boolean }) => (
   <View style={{ flexDirection: "row", alignItems: "center", gap: fontSize * 0.35 }}>
     {showMark && <LinkMark size={fontSize * 1.25} />}
-    <Text style={{ fontSize, fontFamily: "Manrope_800ExtraBold", color: "#F4F6FB", letterSpacing: -0.5 }}>Luma</Text>
+    <Text style={{ fontSize, fontWeight: "700", color: "#F4F6FB", letterSpacing: -0.5 }}>Luma</Text>
   </View>
 );
 
@@ -375,16 +359,6 @@ const FadeInUp = ({ index = 0, children, style }: { index?: number; children: Re
 };
 
 export default function App() {
-  const [fontsLoaded] = useFonts({
-    Manrope_600SemiBold,
-    Manrope_700Bold,
-    Manrope_800ExtraBold,
-  });
-
-  useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
-
   // Navigation
   const [screen, setScreen] = useState("welcome");
   const go = (s: string) => setScreen(s);
@@ -440,10 +414,6 @@ export default function App() {
   const [searchingPlaces, setSearchingPlaces] = useState(false);
   const [activeField, setActiveField] = useState<string | null>(null);
   const [pinMode, setPinMode] = useState<string | null>(null);
-  const [fullMapView, setFullMapView] = useState<{ lat: number | null; lng: number | null; label: string; mode: "driver" | "client" } | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingFullMap, setLoadingFullMap] = useState(false);
-  const [liveSelfLocation, setLiveSelfLocation] = useState<any>(null);
 
   // Booking
   const [selectedService, setSelectedService] = useState("car");
@@ -458,9 +428,6 @@ export default function App() {
   const [promoError, setPromoError] = useState("");
   const [promoCredit, setPromoCredit] = useState(0);
   const [favouriteDrivers, setFavouriteDrivers] = useState<any[]>([]);
-  const [homeAddress, setHomeAddress] = useState<{ text: string; lat: number; lng: number } | null>(null);
-  const [homeAddressInput, setHomeAddressInput] = useState("");
-  const [homeAddressSugg, setHomeAddressSugg] = useState<any[]>([]);
   const [showPaystack, setShowPaystack] = useState(false);
   const [pendingPaymentBookingId, setPendingPaymentBookingId] = useState<string | null>(null);
   const [clientBookings, setClientBookings] = useState<any[]>([]);
@@ -472,8 +439,6 @@ export default function App() {
   const [driverArrivedAt, setDriverArrivedAt] = useState<Date | null>(null);
   const [waitingCharge, setWaitingCharge] = useState(0);
   const [waitingTimer, setWaitingTimer] = useState<any>(null);
-  const [waitingSecondsElapsed, setWaitingSecondsElapsed] = useState(0);
-  const [tripStarted, setTripStarted] = useState(false);
 
   // Driver
   const [online, setOnline] = useState(false);
@@ -496,7 +461,6 @@ export default function App() {
   // Chat
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState("");
-  const [uploadingChatPhoto, setUploadingChatPhoto] = useState(false);
 
   // Rating
   const [ratingBookingId, setRatingBookingId] = useState<string | null>(null);
@@ -527,7 +491,6 @@ export default function App() {
 
   // Refs
   const ptRef = useRef<any>(null);
-  const fullMapWebViewRef = useRef<any>(null);
   const dtRef = useRef<any>(null);
 
   // ============================================================
@@ -601,7 +564,7 @@ export default function App() {
   }, [screen, online]);
 
   useEffect(() => {
-    if (screen === "myBookings" || screen === "clientHome" || screen === "trackRide") {
+    if (screen === "myBookings" || screen === "clientHome") {
       fetchClientBookings();
       const interval = setInterval(fetchClientBookings, 5000);
       return () => clearInterval(interval);
@@ -780,44 +743,14 @@ export default function App() {
     if (!u) return;
     const { data: profile } = await supabase
       .from("profiles")
-      .select("promo_credit, referral_code, full_name, home_address, home_address_lat, home_address_lng")
+      .select("promo_credit, referral_code, full_name")
       .eq("id", u.id)
       .maybeSingle();
     if (profile) {
       setPromoCredit(profile.promo_credit || 0);
       setUser((prev: any) => ({ ...prev, referralCode: profile.referral_code, name: profile.full_name }));
-      if (profile.home_address) {
-        setHomeAddress({
-          text: profile.home_address,
-          lat: profile.home_address_lat,
-          lng: profile.home_address_lng,
-        });
-      }
     }
     fetchFavouriteDrivers();
-  };
-
-  // Saves the client's home address for reuse as a one-tap dropoff suggestion
-  const saveHomeAddress = async (text: string, lat: number, lng: number) => {
-    const { data: { user: u } } = await supabase.auth.getUser();
-    if (!u) {
-      Alert.alert("Sign in required", "Please log in with a real account to save a home address.");
-      return;
-    }
-    const { error } = await supabase.from("profiles").update({
-      home_address: text,
-      home_address_lat: lat,
-      home_address_lng: lng,
-    }).eq("id", u.id);
-    if (error) { Alert.alert("Error", "Could not save your home address: " + error.message); return; }
-    setHomeAddress({ text, lat, lng });
-    Alert.alert("Saved! 🏠", "Your home address will now show as a quick option when booking.");
-  };
-
-  const removeHomeAddress = async () => {
-    const { data: { user: u } } = await supabase.auth.getUser();
-    if (u) await supabase.from("profiles").update({ home_address: null, home_address_lat: null, home_address_lng: null }).eq("id", u.id);
-    setHomeAddress(null);
   };
 
   const fetchDriverReferralCode = async () => {
@@ -864,25 +797,15 @@ export default function App() {
       return;
     }
     const { data: { user: u } } = await supabase.auth.getUser();
-    if (!u) {
-      Alert.alert("Sign in required", "Favourite drivers can only be saved on a real account. Demo accounts can't add favourites.");
-      return;
-    }
-    const clientId = u.id;
+    const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
     const { error } = await supabase.from("favourite_drivers").insert({
       client_id: clientId,
       driver_id: driverId,
       driver_name: driverName,
     });
     if (!error) {
-      haptic("success");
       Alert.alert("Added! ⭐", `${driverName} is now one of your favourite drivers.`);
       fetchFavouriteDrivers();
-    } else {
-      // Surface the real reason instead of failing silently — this is almost
-      // always a Row Level Security policy on favourite_drivers blocking the
-      // insert, and showing the actual error is what makes that diagnosable.
-      Alert.alert("Couldn't add favourite", error.message);
     }
   };
 
@@ -921,7 +844,7 @@ export default function App() {
         }
       }
 
-      if (screen === "myBookings" || screen === "trackRide") {
+      if (screen === "myBookings") {
         // Auto-trigger payment for completed MoMo/Card rides
         const needsPayment = data.find((b: any) =>
           b.status === "completed" &&
@@ -1350,19 +1273,13 @@ export default function App() {
   const selPickup = (p: any) => {
     setPickupText(p.name); setPickupPin({ latitude: p.lat, longitude: p.lon });
     setPickupSugg([]); setActiveField(null);
-    if (dropoffPin) {
-      if (extraStops.some(s => s.pin)) recalcMultiStopFare({ latitude: p.lat, longitude: p.lon }, dropoffPin);
-      else updateFare(p.lat, p.lon, dropoffPin.latitude, dropoffPin.longitude);
-    }
+    if (dropoffPin) updateFare(p.lat, p.lon, dropoffPin.latitude, dropoffPin.longitude);
   };
 
   const selDropoff = (p: any) => {
     setDropoffText(p.name); setDropoffPin({ latitude: p.lat, longitude: p.lon });
     setDropoffSugg([]); setActiveField(null);
-    if (pickupPin) {
-      if (extraStops.some(s => s.pin)) recalcMultiStopFare(pickupPin, { latitude: p.lat, longitude: p.lon });
-      else updateFare(pickupPin.latitude, pickupPin.longitude, p.lat, p.lon);
-    }
+    if (pickupPin) updateFare(pickupPin.latitude, pickupPin.longitude, p.lat, p.lon);
   };
 
   // ============================================================
@@ -1378,11 +1295,7 @@ export default function App() {
     return 110;
   };
 
-  const [submittingHire, setSubmittingHire] = useState(false);
   const submitHire = async () => {
-    if (submittingHire) return;
-    setSubmittingHire(true);
-    try {
     if (!hirePickup) { Alert.alert("Missing", "Please enter your pickup location"); return; }
 
     // Same enforcement as regular ride booking — block until any unpaid
@@ -1440,9 +1353,6 @@ export default function App() {
         }},
       ]
     );
-    } finally {
-      setSubmittingHire(false);
-    }
   };
 
   const addStop = () => {
@@ -1455,6 +1365,7 @@ export default function App() {
 
   const removeStop = (index: number) => {
     setExtraStops(prev => prev.filter((_, i) => i !== index));
+    setTimeout(recalcMultiStopFare, 100);
   };
 
   const stopTextChange = (index: number, text: string) => {
@@ -1470,20 +1381,14 @@ export default function App() {
     setExtraStops(prev => prev.map((s, i) => i === index
       ? { text: p.name, pin: { latitude: p.lat, longitude: p.lon }, suggestions: [] }
       : s));
+    setTimeout(recalcMultiStopFare, 100);
   };
 
-  // Recalculate fare across the full route: pickup -> dropoff -> stop1 -> stop2.
-  // Accepts optional override coordinates so a just-picked pickup/dropoff can be
-  // used immediately, rather than reading stale state before React re-renders.
-  const recalcMultiStopFare = (
-    overridePickup?: { latitude: number; longitude: number },
-    overrideDropoff?: { latitude: number; longitude: number }
-  ) => {
-    const p = overridePickup || pickupPin;
-    const d = overrideDropoff || dropoffPin;
-    if (!p || !d) return;
-    let totalKm = getDist(p.latitude, p.longitude, d.latitude, d.longitude);
-    let lastPoint = d;
+  // Recalculate fare across the full route: pickup -> dropoff -> stop1 -> stop2
+  const recalcMultiStopFare = () => {
+    if (!pickupPin || !dropoffPin) return;
+    let totalKm = getDist(pickupPin.latitude, pickupPin.longitude, dropoffPin.latitude, dropoffPin.longitude);
+    let lastPoint = dropoffPin;
     for (const stop of extraStops) {
       if (stop.pin) {
         totalKm += getDist(lastPoint.latitude, lastPoint.longitude, stop.pin.latitude, stop.pin.longitude);
@@ -1495,14 +1400,10 @@ export default function App() {
     setEstFare(fare);
   };
 
-  // Recalc fare whenever a stop is added/removed OR an existing stop's actual
-  // coordinates change (e.g. picking a different place for the same stop slot) —
-  // keyed on the real lat/lng, not just whether a pin exists, so swapping one
-  // location for another always triggers a fresh calculation.
-  const stopsFareKey = extraStops.map(s => s.pin ? `${s.pin.latitude},${s.pin.longitude}` : "0").join("|");
+  // Recalc fare whenever stops change
   useEffect(() => {
     if (extraStops.some(s => s.pin)) recalcMultiStopFare();
-  }, [stopsFareKey]);
+  }, [extraStops.length, extraStops.map(s => s.pin ? 1 : 0).join("")]);
 
   const saveBookingToSupabase = async (pickup: string, dropoff: string, service: string, price: number, paymentMethodForBooking: string) => {
     const { data: { user: u } } = await supabase.auth.getUser();
@@ -1530,46 +1431,19 @@ export default function App() {
   const VERIFY_PAYMENT_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/verify-payment";
   const PROCESS_WITHDRAWAL_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/process-withdrawal";
 
-  const rebookRide = async (booking: any) => {
+  const rebookRide = (booking: any) => {
     setPickupText(booking.pickup || "");
     setDropoffText(booking.dropoff || "");
     setSelectedService(booking.service || "car");
-    setScheduleRide(false);
-    setScheduledDay(null);
-    setScheduledTime(null);
-    setEstFare(null);
-    setEstKm(null);
+    // Clear any stale pins so the app re-geocodes fresh — the exact coordinates
+    // from the old ride aren't stored, only the address text, so this ensures
+    // an accurate fare rather than reusing a possibly-stale/wrong pin.
     setPickupPin(null);
     setDropoffPin(null);
     go("bookRide");
-
-    // The old ride's exact coordinates were never stored — only the address
-    // text — so re-geocode both here and compute a real fare immediately.
-    // Uses the same resilient, progressively-simplified geocoding as the full
-    // map viewer, since a plain single-shot search frequently failed on the
-    // long, detailed address strings saved from reverse-geocoding — leaving
-    // the fare uncalculated and silently falling back to GHS 20.
-    const [pickupMatch, dropoffMatch] = await Promise.all([
-      booking.pickup ? geocodeResilient(booking.pickup) : Promise.resolve(null),
-      booking.dropoff ? geocodeResilient(booking.dropoff) : Promise.resolve(null),
-    ]);
-    if (pickupMatch) setPickupPin({ latitude: pickupMatch.lat, longitude: pickupMatch.lon });
-    if (dropoffMatch) setDropoffPin({ latitude: dropoffMatch.lat, longitude: dropoffMatch.lon });
-    if (pickupMatch && dropoffMatch) {
-      updateFare(pickupMatch.lat, pickupMatch.lon, dropoffMatch.lat, dropoffMatch.lon);
-    } else {
-      // Couldn't confidently re-pin one or both ends — don't guess at a fare.
-      // The client will see the normal "search/select address" flow and get
-      // an accurate fare once they confirm pickup and dropoff themselves.
-      Alert.alert("Please confirm your route", "We couldn't automatically re-locate one of your previous stops — please confirm pickup and dropoff to get an accurate fare.");
-    }
   };
 
-  const [submittingRide, setSubmittingRide] = useState(false);
   const submitRide = async () => {
-    if (submittingRide) return;
-    setSubmittingRide(true);
-    try {
     if (!pickupText || !dropoffText) { Alert.alert("Missing", "Please enter pickup and dropoff"); return; }
     if (scheduleRide && (!scheduledDay || !scheduledTime)) {
       Alert.alert("Missing", "Please select a day and time for your scheduled ride.");
@@ -1617,9 +1491,6 @@ export default function App() {
         { text: scheduleRide ? "Schedule Ride" : "Book Ride", onPress: () => processBooking(finalFare) },
       ]
     );
-    } finally {
-      setSubmittingRide(false);
-    }
   };
 
   const handlePaystackResult = async (event: any) => {
@@ -1635,7 +1506,6 @@ export default function App() {
         });
         const data = await res.json();
         if (data.verified) {
-          haptic("success");
           // Safety net: confirm the booking is actually marked paid from this session
           // too, in case the backend's own update didn't take effect for any reason —
           // Paystack itself has already confirmed the charge by this point (data.verified
@@ -1653,10 +1523,6 @@ export default function App() {
           const channelLabel = data.channel === "mobile_money" ? "Mobile Money" : "Card";
           if (data.type === "cancellation_fee") {
             Alert.alert("Fee Paid", `GHS ${data.amount} cancellation fee paid via ${channelLabel} — sent directly to your driver.`);
-            if (pendingPaymentBookingId) {
-              const { data: cancelledBooking } = await supabase.from("bookings").select("driver_id").eq("id", pendingPaymentBookingId).maybeSingle();
-              if (cancelledBooking?.driver_id) await notifyPaymentReceived(cancelledBooking.driver_id, data.amount, "a cancellation fee");
-            }
           } else {
             Alert.alert("Payment Successful!", `GHS ${data.amount} received via ${channelLabel}`);
           }
@@ -1742,7 +1608,6 @@ export default function App() {
 
   const doProcessBooking = async (fare: number) => {
     const booking = await saveBookingToSupabase(pickupText, dropoffText, selectedService, fare, paymentMethod);
-    haptic("success");
     const nb = {
       id: booking?.id || Date.now().toString(),
       service: selectedService,
@@ -1789,31 +1654,23 @@ export default function App() {
   };
 
 
-  // Notify only online drivers whose vehicle type matches this ride's service —
-  // e.g. a car ride request should never reach tuktuk or motorbike riders.
+  // Notify every online driver that a new ride request is available
   const notifyOnlineDrivers = async (pickup: string, service: string, price: number, bookingId?: string) => {
-    const serviceToRole: Record<string, string> = {
-      car: "car_driver",
-      tuktuk: "tuktuk_driver",
-      motorbike: "motorbike_rider",
-    };
-    const matchingRole = serviceToRole[service] || "car_driver";
+    // Only drivers who are currently online and have a push token
+    const driverRoles = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"];
     const { data: drivers } = await supabase
       .from("profiles")
       .select("id, push_token, is_online, role, notif_push, notif_rides")
       .eq("is_online", true)
-      .eq("role", matchingRole);
+      .in("role", driverRoles);
     if (!drivers) return;
     const serviceLabel = service === "tuktuk" ? "Tuk Tuk" : service === "motorbike" ? "Motorbike" : "Car";
 
     const notifyList = (list: any[], priority: boolean) => {
       list.forEach((d: any) => {
         if (d.notif_push === false || d.notif_rides === false) return;
-        const title = priority ? "⭐ A Favourite Client Wants You!" : "New Ride Request! 🚗";
-        const body = priority
-          ? `You're this client's favourite driver! ${serviceLabel} pickup near ${pickup?.split(",")[0] || "you"} — GHS ${price}. Open the app to accept.`
-          : `${serviceLabel} pickup near ${pickup?.split(",")[0] || "you"} — GHS ${price}. Open the app to accept.`;
-        sendPushNotification(d.push_token, title, body, d.id);
+        const title = priority ? "⭐ Your Favourite Driver Wants You!" : "New Ride Request! 🚗";
+        sendPushNotification(d.push_token, title, `${serviceLabel} pickup near ${pickup?.split(",")[0] || "you"} — GHS ${price}. Open the app to accept.`, d.id);
       });
     };
 
@@ -1842,64 +1699,6 @@ export default function App() {
     notifyList(drivers, false);
   };
 
-  // Shows a full-screen, in-app map (OpenStreetMap — free, no API key needed)
-  // with a LIVE moving marker — driver's own GPS in "driver" mode, or the
-  // driver's live position (already tracked for the client) in "client" mode.
-  // Geocodes the stored address text since bookings only save an address string,
-  // not lat/lng. Switch this to real Google Maps turn-by-turn once billing is set up.
-  // Pickup/dropoff text is often a long, highly-detailed string from
-  // reverse-geocoding a GPS pin (e.g. "Shop 4, Rawlings Ave, near Presec Gate,
-  // Legon, Accra, Greater Accra Region, Ghana"). Feeding that exact string into
-  // a forward address SEARCH frequently fails to match anything, even though
-  // the place is real — so retry with progressively simpler versions of the
-  // same address before giving up. Shared by openFullMap and rebookRide.
-  const geocodeResilient = async (addressText: string): Promise<{ lat: number; lon: number } | null> => {
-    const segments = addressText.split(",").map(s => s.trim()).filter(Boolean);
-    const attempts = [addressText, segments.slice(0, 3).join(", "), segments.slice(0, 2).join(", "), segments[0]]
-      .filter((v, i, arr) => v && arr.indexOf(v) === i);
-    for (const attempt of attempts) {
-      const results = await searchPlaces(attempt);
-      if (results && results.length > 0) return { lat: results[0].lat, lon: results[0].lon };
-    }
-    return null;
-  };
-
-  const openFullMap = async (addressText: string | null | undefined, label: string, mode: "driver" | "client") => {
-    if (!addressText) {
-      Alert.alert("No location yet", "This location isn't available yet.");
-      return;
-    }
-    setLoadingFullMap(true);
-    const found = await geocodeResilient(addressText);
-    setLoadingFullMap(false);
-
-    if (found) {
-      setFullMapView({ lat: found.lat, lng: found.lon, label, mode });
-    } else {
-      // Couldn't pin the exact address — still show the map with live location
-      // alone rather than blocking the feature entirely.
-      setFullMapView({ lat: null, lng: null, label, mode });
-    }
-  };
-
-  // While the driver's full map is open, watch their own live GPS position —
-  // this is what makes the destination pin actually feel like "tracking" instead
-  // of a static snapshot. Stops watching the instant the map is closed.
-  useEffect(() => {
-    if (!fullMapView || fullMapView.mode !== "driver") { setLiveSelfLocation(null); return; }
-    let sub: any;
-    let cancelled = false;
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted" || cancelled) return;
-      sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
-        (loc) => setLiveSelfLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude })
-      );
-    })();
-    return () => { cancelled = true; if (sub) sub.remove(); };
-  }, [fullMapView?.mode, fullMapView ? 1 : 0]);
-
   const checkForUnfinishedRide = async () => {
     const { data: { user: u } } = await supabase.auth.getUser();
     if (!u) return;
@@ -1918,7 +1717,6 @@ export default function App() {
     if (!ride) return;
     setActiveBookingId(ride.id);
     setBookingAcceptedAt(ride.accepted_at ? new Date(ride.accepted_at) : new Date());
-    setTripStarted(false);
     fetchMessages(ride.id);
     watchDriverLocation(ride.id);
     go("activeRide");
@@ -1927,11 +1725,6 @@ export default function App() {
   // Checks for a new pending ride matching this driver's service type, so it can
   // be shown as an in-app popup on whatever screen they're currently viewing —
   // no need to navigate away to see or accept it.
-  const seenRideAlertIdsRef = useRef<string[]>([]);
-  useEffect(() => { seenRideAlertIdsRef.current = seenRideAlertIds; }, [seenRideAlertIds]);
-  const incomingRideAlertRef = useRef<any>(null);
-  useEffect(() => { incomingRideAlertRef.current = incomingRideAlert; }, [incomingRideAlert]);
-
   const checkForIncomingRideAlert = async () => {
     if (!online || !user?.role) return;
     const serviceMap: { [key: string]: string } = { car_driver: "car", tuktuk_driver: "tuktuk", motorbike_rider: "motorbike" };
@@ -1946,13 +1739,8 @@ export default function App() {
       .order("created_at", { ascending: false })
       .limit(5);
 
-    // Read from refs, not the closured state directly — this function is called
-    // from a setInterval set up once when the driver goes online, so its closure
-    // would otherwise keep seeing the seenRideAlertIds/incomingRideAlert values
-    // from THAT moment forever, meaning a dismissed ride would never actually
-    // stay dismissed and would keep popping back up on every 6-second poll.
-    const fresh = (data || []).find((b: any) => !seenRideAlertIdsRef.current.includes(b.id));
-    if (fresh && !incomingRideAlertRef.current) {
+    const fresh = (data || []).find((b: any) => !seenRideAlertIds.includes(b.id));
+    if (fresh && !incomingRideAlert) {
       setIncomingRideAlert(fresh);
     }
   };
@@ -1972,7 +1760,6 @@ export default function App() {
     }).eq("id", bookingId).select().maybeSingle();
 
     if (!error) {
-      haptic("success");
       fetchDriverBookings();
       checkForUnfinishedRide();
 
@@ -1990,7 +1777,6 @@ export default function App() {
         setBookingAcceptedAt(new Date());
         setRideArrivedAtDelivery(false);
         setRideDeliveryProofPhoto(null);
-        setTripStarted(false);
         fetchMessages(bookingId);
         watchDriverLocation(bookingId);
         go("activeRide");
@@ -2025,7 +1811,6 @@ export default function App() {
       status: "completed",
       ...(deliveryPhotoUrl ? { delivery_photo: deliveryPhotoUrl } : {}),
     }).eq("id", activeBookingId);
-    haptic("success");
     setRideDeliveryProofPhoto(null);
 
     let cashCommissionOwed = 0;
@@ -2086,7 +1871,6 @@ export default function App() {
             last_updated: new Date().toISOString(),
           });
         }
-        await notifyPaymentReceived(driverId, driverEarnings, "a completed ride");
       }
 
       // Check driver referral bonus — Blueprint: GHS 15 to referrer after recruit's 10th ride
@@ -2175,9 +1959,6 @@ export default function App() {
     const startTime = new Date();
     setDriverArrivedAt(startTime);
     setWaitingCharge(0);
-    setWaitingSecondsElapsed(0);
-    setTripStarted(false);
-    haptic("medium");
 
     // Notify client that driver has arrived
     const booking = driverBookings.find(b => b.id === bookingId);
@@ -2189,15 +1970,10 @@ export default function App() {
       });
     }
 
-    // Ticks every second so the free-time countdown feels real, rather than
-    // only updating once a minute. The GHS 1/min charge and the 15-min
-    // auto-cancel are still computed off actual elapsed minutes underneath.
     const timer = setInterval(async () => {
-      const elapsedSeconds = Math.floor((new Date().getTime() - startTime.getTime()) / 1000);
-      setWaitingSecondsElapsed(elapsedSeconds);
-      const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+      const elapsed = Math.floor((new Date().getTime() - startTime.getTime()) / 60000);
 
-      if (elapsedMinutes > 15) {
+      if (elapsed > 15) {
         // Auto-cancel after 15 mins — GHS 10 fee owed by the client
         clearInterval(timer);
         setWaitingTimer(null);
@@ -2209,34 +1985,20 @@ export default function App() {
         }).eq("id", bookingId);
         Alert.alert("Auto Cancelled", "Client did not show up. A GHS 10 fee has been applied — it'll reach your wallet once the client's payment is confirmed.");
         go("driverHome");
-      } else if (elapsedMinutes > 5) {
+      } else if (elapsed > 5) {
         // GHS 1/min after 5 free minutes
-        const charge = (elapsedMinutes - 5) * 1;
+        const charge = (elapsed - 5) * 1;
         setWaitingCharge(charge);
         await supabase.from("bookings").update({ waiting_charge: charge }).eq("id", bookingId);
       }
-    }, 1000);
+    }, 60000); // Check every minute
 
     setWaitingTimer(timer);
-  };
-
-  // Driver taps this once the client actually shows up — stops the waiting
-  // clock/charge immediately and unlocks the rest of the ride (dropoff
-  // navigation, completion). Deliberately does NOT clear driverArrivedAt —
-  // that stays set so dropoff navigation and "already arrived" state remain
-  // correct; only the interval/charge actually needs to stop.
-  const startTrip = () => {
-    if (waitingTimer) { clearInterval(waitingTimer); setWaitingTimer(null); }
-    setWaitingCharge(0);
-    setWaitingSecondsElapsed(0);
-    setTripStarted(true);
-    haptic("success");
   };
 
   const stopWaitingTimer = () => {
     if (waitingTimer) { clearInterval(waitingTimer); setWaitingTimer(null); }
     setWaitingCharge(0);
-    setWaitingSecondsElapsed(0);
     setDriverArrivedAt(null);
   };
 
@@ -2263,24 +2025,6 @@ export default function App() {
         last_updated: new Date().toISOString(),
       });
     }
-  };
-
-  // Notifies any earning user (driver, rider, or restaurant owner) that money has
-  // landed in their wallet, including their up-to-date balance — used for every
-  // payment event: ride completion, tips, cancellation fees, and food/delivery
-  // payouts. Reads the balance fresh so it's accurate even when the credit itself
-  // happened moments earlier (client-side or via the backend).
-  const notifyPaymentReceived = async (userId: string | null | undefined, amount: number, source: string) => {
-    if (!userId || !amount) return;
-    const { data: profile } = await supabase.from("profiles").select("push_token").eq("id", userId).maybeSingle();
-    const { data: wallet } = await supabase.from("wallets").select("balance").eq("user_id", userId).maybeSingle();
-    const balanceLabel = wallet?.balance != null ? `GHS ${wallet.balance.toFixed(2)}` : "your wallet";
-    sendPushNotification(
-      profile?.push_token,
-      "Payment Received 💰",
-      `GHS ${amount.toFixed(2)} from ${source}. New balance: ${balanceLabel}.`,
-      userId
-    );
   };
 
   // ============================================================
@@ -2449,57 +2193,6 @@ export default function App() {
     }
   };
 
-  // Sends a photo in the ride chat. Capped at 5 photos per person per ride —
-  // keeps chat storage/costs bounded and matches the blueprint's in-app chat
-  // scope (text-first, photos for showing something quickly, not a gallery).
-  const CHAT_PHOTO_LIMIT = 5;
-  const sendChatPhoto = async (bookingId: string) => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const u = sessionData?.session?.user;
-    const senderId = u?.id || "00000000-0000-0000-0000-000000000003";
-
-    const { count } = await supabase
-      .from("messages")
-      .select("id", { count: "exact", head: true })
-      .eq("booking_id", bookingId)
-      .eq("sender_id", senderId)
-      .not("image_url", "is", null);
-    if ((count || 0) >= CHAT_PHOTO_LIMIT) {
-      Alert.alert("Photo limit reached", `You can send up to ${CHAT_PHOTO_LIMIT} photos per ride in chat.`);
-      return;
-    }
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to send a photo in chat."); return; }
-    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.5, allowsEditing: true });
-    if (r.canceled) return;
-
-    setUploadingChatPhoto(true);
-    const photoUrl = await uploadImageToStorage(r.assets[0].uri, "chat-photos", `${bookingId}/${senderId}/${Date.now()}.jpg`);
-    setUploadingChatPhoto(false);
-    if (!photoUrl) { Alert.alert("Upload failed", "Could not send the photo. Please try again."); return; }
-
-    await supabase.from("messages").insert({
-      booking_id: bookingId,
-      sender_id: senderId,
-      sender_name: user?.name || u?.email || "Demo User",
-      message: "",
-      image_url: photoUrl,
-    });
-    fetchMessages(bookingId);
-
-    const { data: booking } = await supabase.from("bookings").select("client_id, driver_id").eq("id", bookingId).maybeSingle();
-    if (booking) {
-      const recipientId = booking.client_id === senderId ? booking.driver_id : booking.client_id;
-      if (recipientId) {
-        const { data: recipient } = await supabase.from("profiles").select("push_token").eq("id", recipientId).maybeSingle();
-        if (recipient?.push_token) {
-          sendPushNotification(recipient.push_token, `New photo from ${user?.name || "your ride"} 📷`, "Tap to view in chat.", recipientId);
-        }
-      }
-    }
-  };
-
   // ============================================================
   // SOS
   // ============================================================
@@ -2513,7 +2206,6 @@ export default function App() {
 
   const startSosHold = () => {
     setSosHolding(true);
-    haptic("warning");
     sosHoldTimer.current = setTimeout(() => {
       beginSosCountdown();
     }, 3000);
@@ -2561,18 +2253,6 @@ export default function App() {
     if (data) {
       setNotifications(data);
       setUnreadCount(data.filter((n: any) => !n.read).length);
-    }
-  };
-
-  // Shared pull-to-refresh handler — pass whichever fetch function(s) are
-  // relevant to the screen being refreshed. Keeps a single `refreshing` flag
-  // rather than one per screen, since only one screen is ever visible at a time.
-  const handleRefresh = async (...fetchFns: Array<() => Promise<any> | void>) => {
-    setRefreshing(true);
-    try {
-      await Promise.all(fetchFns.map(fn => fn()));
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -2823,7 +2503,6 @@ export default function App() {
         });
         const data = await res.json();
         if (data.verified) {
-          haptic("success");
           const { data: order } = await supabase.from("food_orders").select("*").eq("id", foodPaymentOrderId).maybeSingle();
           if (order) await notifyRestaurantOfNewOrder(order, data.amount);
           setFoodCart([]);
@@ -2859,12 +2538,7 @@ export default function App() {
         });
         const data = await res.json();
         if (data.verified) {
-          haptic("success");
           Alert.alert("Payment Successful! 🎉", "Thanks — your rider has been paid for the delivery.");
-          if (deliveryFeeOrderId) {
-            const { data: deliveredOrder } = await supabase.from("food_orders").select("rider_id, delivery_fee").eq("id", deliveryFeeOrderId).maybeSingle();
-            if (deliveredOrder?.rider_id) await notifyPaymentReceived(deliveredOrder.rider_id, deliveredOrder.delivery_fee || data.amount, "a delivery fee");
-          }
           fetchFoodOrders();
         } else {
           Alert.alert("Payment Failed", "We could not verify your payment. You can retry from My Food Orders.");
@@ -3154,7 +2828,6 @@ export default function App() {
       if (restaurant?.owner_id && order.subtotal) {
         const restaurantEarnings = parseFloat((order.subtotal * (1 - PLATFORM_SETTINGS.food_commission)).toFixed(2));
         await adjustWallet(restaurant.owner_id, restaurantEarnings);
-        await notifyPaymentReceived(restaurant.owner_id, restaurantEarnings, "a food order");
       }
     }
 
@@ -3241,7 +2914,6 @@ export default function App() {
   const executeSOS = async () => {
     setSosActive(true);
     setSosCountdown(0);
-    haptic("error");
 
     const { data: { user: u } } = await supabase.auth.getUser();
 
@@ -3646,12 +3318,7 @@ export default function App() {
         const data = await res.json();
         setShowTipPaystack(false);
         if (data.verified) {
-          haptic("success");
           Alert.alert("Tip Sent! 🙏", `GHS ${data.amount} sent directly to your driver. 100% goes to them.`);
-          if (tipBookingId) {
-            const { data: tippedBooking } = await supabase.from("bookings").select("driver_id").eq("id", tipBookingId).maybeSingle();
-            if (tippedBooking?.driver_id) await notifyPaymentReceived(tippedBooking.driver_id, data.amount, "a tip");
-          }
         } else {
           Alert.alert("Tip Failed", "We could not verify your tip payment. Your driver was not charged... or credited.");
         }
@@ -3920,24 +3587,24 @@ export default function App() {
     safe: { flex: 1, backgroundColor: "#0B1220" },
     center: { flex: 1, backgroundColor: "#0B1220", justifyContent: "center", alignItems: "center", padding: 28 },
     nav: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: "#1B2A44" },
-    navLogo: { color: "#F4F6FB", fontSize: 19, fontFamily: "Manrope_700Bold", letterSpacing: 0.3 },
-    navLink: { color: "#2DD4BF", fontSize: 14, fontFamily: "Manrope_600SemiBold" },
-    title: { color: "#F4F6FB", fontSize: 28, fontFamily: "Manrope_800ExtraBold", marginBottom: 6, letterSpacing: -0.5 },
+    navLogo: { color: "#F4F6FB", fontSize: 19, fontWeight: "700", letterSpacing: 0.3 },
+    navLink: { color: "#2DD4BF", fontSize: 14, fontWeight: "600" },
+    title: { color: "#F4F6FB", fontSize: 28, fontWeight: "800", marginBottom: 6, letterSpacing: -0.5 },
     input: { backgroundColor: "#131C2E", color: "#F4F6FB", borderRadius: 14, padding: 16, marginBottom: 14, fontSize: 15, borderWidth: 1, borderColor: "#1B2A44" },
-    btn: { backgroundColor: "#2DD4BF", borderRadius: 24, padding: 17, alignItems: "center", marginTop: 10, shadowColor: "#2DD4BF", shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
-    btnTxt: { color: "#04231F", fontFamily: "Manrope_800ExtraBold", fontSize: 16, letterSpacing: 0.2 },
-    btnOut: { borderWidth: 1.5, borderColor: "#2DD4BF", borderRadius: 24, padding: 16, alignItems: "center", marginTop: 10 },
-    btnOutTxt: { color: "#2DD4BF", fontFamily: "Manrope_700Bold", fontSize: 16 },
-    btnGreen: { backgroundColor: "#0F2A2270", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 24, padding: 15, alignItems: "center", marginTop: 10 },
-    btnRed: { backgroundColor: "#3A1A1A70", borderWidth: 1, borderColor: "#F87171", borderRadius: 24, padding: 15, alignItems: "center", marginTop: 10 },
-    card: { backgroundColor: "#131C2E", borderRadius: 16, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: "#1B2A44", shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
-    cardTitle: { color: "#F4F6FB", fontSize: 16, fontFamily: "Manrope_700Bold" },
+    btn: { backgroundColor: "#2DD4BF", borderRadius: 14, padding: 17, alignItems: "center", marginTop: 10, shadowColor: "#2DD4BF", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+    btnTxt: { color: "#04231F", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
+    btnOut: { borderWidth: 1.5, borderColor: "#2DD4BF", borderRadius: 14, padding: 16, alignItems: "center", marginTop: 10 },
+    btnOutTxt: { color: "#2DD4BF", fontWeight: "700", fontSize: 16 },
+    btnGreen: { backgroundColor: "#0F2A2270", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 14, padding: 15, alignItems: "center", marginTop: 10 },
+    btnRed: { backgroundColor: "#3A1A1A70", borderWidth: 1, borderColor: "#F87171", borderRadius: 14, padding: 15, alignItems: "center", marginTop: 10 },
+    card: { backgroundColor: "#131C2E", borderRadius: 16, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: "#1B2A44" },
+    cardTitle: { color: "#F4F6FB", fontSize: 16, fontWeight: "700" },
     cardSub: { color: "#8A9BB8", fontSize: 13, marginTop: 3, lineHeight: 18 },
-    badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, alignSelf: "flex-start", marginTop: 8 },
-    sectionTitle: { color: "#8A9BB8", fontSize: 12, fontFamily: "Manrope_700Bold", letterSpacing: 1.5, marginBottom: 12, marginTop: 16, textTransform: "uppercase" },
+    badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, alignSelf: "flex-start", marginTop: 8 },
+    sectionTitle: { color: "#8A9BB8", fontSize: 12, fontWeight: "700", letterSpacing: 1.5, marginBottom: 12, marginTop: 16, textTransform: "uppercase" },
     row: { flexDirection: "row", gap: 10, marginBottom: 18 },
-    statCard: { backgroundColor: "#131C2E", borderRadius: 16, padding: 16, alignItems: "center", flex: 1, borderWidth: 1, borderColor: "#1B2A44", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-    statVal: { color: "#2DD4BF", fontSize: 20, fontFamily: "Manrope_800ExtraBold" },
+    statCard: { backgroundColor: "#131C2E", borderRadius: 16, padding: 16, alignItems: "center", flex: 1, borderWidth: 1, borderColor: "#1B2A44" },
+    statVal: { color: "#2DD4BF", fontSize: 20, fontWeight: "800" },
     statLabel: { color: "#8A9BB8", fontSize: 11, marginTop: 5, letterSpacing: 0.3 },
     roleBtn: { borderRadius: 18, padding: 24, alignItems: "center", marginBottom: 14, borderWidth: 1.5 },
     uploadBox: { backgroundColor: "#131C2E", borderRadius: 16, borderWidth: 1.5, borderColor: "#1B2A44", borderStyle: "dashed", padding: 24, alignItems: "center", marginBottom: 14 },
@@ -3957,12 +3624,8 @@ export default function App() {
     serviceRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
     serviceBtn: { flex: 1, borderRadius: 12, padding: 12, alignItems: "center", borderWidth: 1 },
     chatBubble: { borderRadius: 14, padding: 12, marginBottom: 8, maxWidth: "80%" },
-    sosBtn: { backgroundColor: "#3A1A1A70", borderWidth: 1, borderColor: "#F87171", borderRadius: 24, paddingVertical: 12, paddingHorizontal: 16, alignItems: "center", marginTop: 18, alignSelf: "center" },
+    sosBtn: { backgroundColor: "#3A1A1A70", borderWidth: 1, borderColor: "#F87171", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, alignItems: "center", marginTop: 18, alignSelf: "center" },
   });
-
-  // Every hook above this line has now run, in the same order, on every render —
-  // safe to bail out here before any screen JSX is returned.
-  if (!fontsLoaded) return null;
 
   // ============================================================
   // SCREENS
@@ -4130,93 +3793,6 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // FULL-SCREEN MAP VIEWER — in-app only, no external app switch. Uses free
-  // OpenStreetMap tiles (no billing needed). Swap for real Google Maps once
-  // billing is set up for turn-by-turn directions.
-  if (loadingFullMap) return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.center}><Pulse label="Locating on map..." size={40} /></View>
-    </SafeAreaView>
-  );
-
-  if (fullMapView) {
-    const liveCoord = fullMapView.mode === "driver"
-      ? (liveSelfLocation || location)
-      : (driverLiveLocation || pickupPin || location);
-    const hasLive = !!liveCoord;
-    const hasDestination = fullMapView.lat != null && fullMapView.lng != null;
-    // Ghana-centered fallback only used if BOTH live and destination are unavailable
-    const liveLat = liveCoord?.latitude ?? fullMapView.lat ?? 6.6;
-    const liveLng = liveCoord?.longitude ?? fullMapView.lng ?? -0.9;
-    const liveLabel = fullMapView.mode === "driver" ? "You" : "Your Driver";
-    return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.nav}>
-        <TouchableOpacity onPress={() => setFullMapView(null)}><Text style={s.navLink}>Close</Text></TouchableOpacity>
-        <Text style={s.navLogo}>{fullMapView.label}</Text>
-        <View />
-      </View>
-      <View style={{ flex: 1 }}>
-        <WebView
-          ref={fullMapWebViewRef}
-          style={{ flex: 1 }}
-          source={{
-            html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}.leaflet-popup-content-wrapper{background:#131C2E;color:#F4F6FB;border-radius:10px}.leaflet-popup-tip{background:#131C2E}</style></head><body><div id="map"></div><script>
-              var liveLat=${liveLat}, liveLng=${liveLng};
-              var liveIcon=L.divIcon({html:'<div style="width:22px;height:22px;background:#2DD4BF;border:3px solid #0B1220;border-radius:50%;box-shadow:0 0 8px rgba(45,212,191,0.7);"></div>',iconSize:[22,22],className:"fp-live"});
-              // Draws the real road route via OSRM's free public routing service (no API
-              // key needed). Falls back to a straight dashed line if the route request
-              // fails — e.g. brief connectivity loss, or the free demo server being busy.
-              function lumaDrawRoute(map, fromLat, fromLng, toLat, toLng, color){
-                var url = "https://router.project-osrm.org/route/v1/driving/" + fromLng + "," + fromLat + ";" + toLng + "," + toLat + "?overview=full&geometries=geojson";
-                fetch(url).then(function(r){ return r.json(); }).then(function(data){
-                  if (data && data.routes && data.routes[0] && data.routes[0].geometry) {
-                    var coords = data.routes[0].geometry.coordinates.map(function(c){ return [c[1], c[0]]; });
-                    L.polyline(coords, {color: color, weight: 5, opacity: 0.85, lineJoin: "round"}).addTo(map);
-                  } else {
-                    L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 3, opacity: 0.6, dashArray: "6,8"}).addTo(map);
-                  }
-                }).catch(function(){
-                  L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 3, opacity: 0.6, dashArray: "6,8"}).addTo(map);
-                });
-              }
-              ${hasDestination ? `
-              var destLat=${fullMapView.lat}, destLng=${fullMapView.lng};
-              var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true,boxZoom:true}).fitBounds([[destLat,destLng],[liveLat,liveLng]],{padding:[40,40]});
-              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-              lumaDrawRoute(map, liveLat, liveLng, destLat, destLng, "#2DD4BF");
-              var destIcon=L.divIcon({html:'<svg width="34" height="42" viewBox="0 0 34 42" xmlns="http://www.w3.org/2000/svg"><path d="M17 0C7.6 0 0 7.6 0 17c0 12 17 25 17 25s17-13 17-25C34 7.6 26.4 0 17 0z" fill="#F5A623"/><circle cx="17" cy="17" r="6" fill="#0B1220"/></svg>',iconSize:[34,42],iconAnchor:[17,42],className:"fp-dest"});
-              L.marker([destLat,destLng],{icon:destIcon}).addTo(map).bindPopup(${JSON.stringify(fullMapView.label)});
-              L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
-              ` : `
-              var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true,boxZoom:true}).setView([liveLat,liveLng],15);
-              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-              L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
-              `}
-              window.lumaMap = map;
-              window.lumaRecenter = function(lat,lng){ window.lumaMap.setView([lat,lng], 16); };
-            </script></body></html>`
-          }}
-        />
-        <TouchableOpacity
-          onPress={() => fullMapWebViewRef.current?.injectJavaScript(`window.lumaRecenter && window.lumaRecenter(${liveLat},${liveLng}); true;`)}
-          style={{ position: "absolute", bottom: 16, right: 16, backgroundColor: "#2DD4BF", borderRadius: 24, width: 48, height: 48, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 }}>
-          <Ionicons name="locate" size={22} color="#04231F" />
-        </TouchableOpacity>
-      </View>
-      <View style={{ padding: 12, backgroundColor: "#131C2E", borderTopWidth: 1, borderTopColor: "#1B2A44" }}>
-        {!hasDestination && (
-          <Text style={{ color: "#F5A623", textAlign: "center", fontSize: 12, marginBottom: 4 }}>Couldn't pinpoint the exact address — showing your live location only</Text>
-        )}
-        {hasLive
-          ? <Text style={{ color: "#2DD4BF", textAlign: "center", fontSize: 12 }}>{"●"} Live — updating every 3 seconds</Text>
-          : <Text style={{ color: "#8A9BB8", textAlign: "center", fontSize: 12 }}>Waiting for live location...</Text>
-        }
-      </View>
-    </SafeAreaView>
-    );
-  }
-
   // MAINTENANCE MODE — highest priority, blocks the entire app when active
   if (maintenanceMode) return (
     <SafeAreaView style={s.safe}>
@@ -4247,11 +3823,11 @@ export default function App() {
           {activeBookingId && (
             <Text style={{ color: "#f5a623", fontSize: 12, textAlign: "center", marginBottom: 12 }}>You're mid-ride — accepting adds this to your queue without interrupting your current trip.</Text>
           )}
-          <Tappable
+          <TouchableOpacity
             style={[s.btn, { width: "100%" }]}
             onPress={() => { const ride = incomingRideAlert; dismissRideAlert(); acceptOrder(ride.id); }}>
             <Text style={s.btnTxt}>Accept</Text>
-          </Tappable>
+          </TouchableOpacity>
           <TouchableOpacity style={{ marginTop: 14 }} onPress={dismissRideAlert}>
             <Text style={{ color: "#5A6B85", fontSize: 13 }}>Dismiss</Text>
           </TouchableOpacity>
@@ -4479,7 +4055,7 @@ export default function App() {
       <View style={s.center}>
         <View style={{ marginBottom: 4 }}><Wordmark fontSize={34} /></View>
         <Text style={{ color: "#8A9BB8", fontSize: 14, marginBottom: 8, textAlign: "center" }}>Ghana's Own Super App</Text>
-        <Text style={{ color: "#5A6B85", fontSize: 12, marginBottom: 40, textAlign: "center" }}>Rides | Delivery | Food</Text>
+        <Text style={{ color: "#5A6B85", fontSize: 12, marginBottom: 40, textAlign: "center" }}>Rides | Delivery | Food | Home Services</Text>
         <TouchableOpacity style={[s.btn, { width: "100%" }]} onPress={() => { setAuthMode("login"); go("auth"); }}>
           <Text style={s.btnTxt}>Log In</Text>
         </TouchableOpacity>
@@ -4504,7 +4080,7 @@ export default function App() {
         <Text style={{ color: "#8A9BB8", textAlign: "center", marginBottom: 24 }}>Choose your role to get started</Text>
 
         {[
-          { role: "client", iconName: "person", label: "Client", sub: "Book rides, deliveries and food", color: "#5B8FE0" },
+          { role: "client", iconName: "person", label: "Client", sub: "Book rides, deliveries and food", color: "#2196f3" },
           { role: "car_driver", iconName: "car-sport", label: "Car Driver", sub: "Provide point-to-point rides", color: "#2DD4BF" },
           { role: "tuktuk_driver", iconName: "car", label: "Tuk Tuk Rider", sub: "Affordable short distance trips", color: "#2DD4BF" },
           { role: "motorbike_rider", iconName: "bicycle", label: "Motorbike Rider", sub: "Fast parcel and errand delivery", color: "#2DD4BF" },
@@ -4906,7 +4482,7 @@ export default function App() {
           <TouchableOpacity onPress={() => go("notifications")} style={{ position: "relative" }}>
             <Ionicons name="notifications-outline" size={22} color="#2DD4BF" />
             {unreadCount > 0 && (
-              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#F87171", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
+              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#f44336", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
                 <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
               </View>
             )}
@@ -4952,14 +4528,14 @@ export default function App() {
           <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
         </Tappable>
         <Tappable onPress={() => go("restaurantIncomingOrders")} style={[s.card, { flexDirection: "row", alignItems: "center" }]}>
-          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#F5A62322", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
-            <Ionicons name="receipt" size={26} color="#F5A623" />
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#ff980022", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="receipt" size={26} color="#ff9800" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>Incoming Orders</Text>
             <Text style={s.cardSub}>See and accept new food orders</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#F5A623" />
+          <Ionicons name="chevron-forward" size={20} color="#ff9800" />
         </Tappable>
         <Tappable onPress={() => go("driverEarnings")} style={[s.card, { flexDirection: "row", alignItems: "center" }]}>
           <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
@@ -4986,7 +4562,7 @@ export default function App() {
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={s.sectionTitle}>YOUR DISHES</Text>
         {menuItems.length === 0 ? (
-          <EmptyState icon="restaurant-outline" title="No dishes yet" subtitle="Add your first dish below — a photo, name, and price is all it takes to go live." />
+          <Text style={{ color: "#5A6B85", fontSize: 13, marginBottom: 16 }}>No dishes added yet — add your first one below.</Text>
         ) : (
           menuItems.map((item) => (
             <View key={item.id} style={[s.card, { flexDirection: "row", alignItems: "center", opacity: item.is_available ? 1 : 0.5 }]}>
@@ -4999,7 +4575,7 @@ export default function App() {
                 <Ionicons name={item.is_available ? "eye" : "eye-off"} size={22} color={item.is_available ? "#2DD4BF" : "#5A6B85"} />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => deleteMenuItem(item)}>
-                <Ionicons name="trash-outline" size={20} color="#F87171" />
+                <Ionicons name="trash-outline" size={20} color="#f44336" />
               </TouchableOpacity>
             </View>
           ))
@@ -5042,9 +4618,9 @@ export default function App() {
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <Text style={s.cardTitle}>{order.client_name}</Text>
                 <View style={[s.badge, {
-                  backgroundColor: order.status === "pending" ? "#F5A62322" : order.status === "preparing" ? "#5B8FE022" : order.status === "ready_for_pickup" ? "#2DD4BF22" : "#8A9BB822"
+                  backgroundColor: order.status === "pending" ? "#ff980022" : order.status === "preparing" ? "#2196f322" : order.status === "ready_for_pickup" ? "#2DD4BF22" : "#8A9BB822"
                 }]}>
-                  <Text style={{ color: order.status === "pending" ? "#F5A623" : order.status === "preparing" ? "#5B8FE0" : order.status === "ready_for_pickup" ? "#2DD4BF" : "#8A9BB8", fontSize: 11, fontWeight: "700" }}>
+                  <Text style={{ color: order.status === "pending" ? "#ff9800" : order.status === "preparing" ? "#2196f3" : order.status === "ready_for_pickup" ? "#2DD4BF" : "#8A9BB8", fontSize: 11, fontWeight: "700" }}>
                     {order.status === "pending" ? "NEW" : order.status === "preparing" ? "PREPARING" : order.status === "ready_for_pickup" ? "READY — AWAITING RIDER" : order.status.toUpperCase()}
                   </Text>
                 </View>
@@ -5077,7 +4653,7 @@ export default function App() {
           <TouchableOpacity onPress={() => go("notifications")} style={{ position: "relative" }}>
             <Ionicons name="notifications-outline" size={22} color="#2DD4BF" />
             {unreadCount > 0 && (
-              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#F87171", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
+              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#f44336", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
                 <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
               </View>
             )}
@@ -5097,48 +4673,44 @@ export default function App() {
         )}
 
         {queuedRides.length === 1 && (
-          <TouchableOpacity onPress={() => resumeUnfinishedRide()} style={{ backgroundColor: "#F8717122", borderWidth: 1, borderColor: "#F87171", borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: "row", alignItems: "center" }}>
-            <Ionicons name="alert-circle" size={24} color="#F87171" />
+          <TouchableOpacity onPress={() => resumeUnfinishedRide()} style={{ backgroundColor: "#f4433622", borderWidth: 1, borderColor: "#f44336", borderRadius: 12, padding: 14, marginBottom: 16, flexDirection: "row", alignItems: "center" }}>
+            <Ionicons name="alert-circle" size={24} color="#f44336" />
             <View style={{ flex: 1, marginLeft: 10 }}>
-              <Text style={{ color: "#F87171", fontWeight: "bold", fontSize: 14 }}>You have an unfinished ride</Text>
+              <Text style={{ color: "#f44336", fontWeight: "bold", fontSize: 14 }}>You have an unfinished ride</Text>
               <Text style={{ color: "#F4F6FB", fontSize: 12, marginTop: 2 }}>To: {unfinishedRide.dropoff} — tap to resume</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#F87171" />
+            <Ionicons name="chevron-forward" size={20} color="#f44336" />
           </TouchableOpacity>
         )}
         {queuedRides.length > 1 && (
-          <View style={{ backgroundColor: "#F8717122", borderWidth: 1, borderColor: "#F87171", borderRadius: 12, padding: 14, marginBottom: 16 }}>
-            <Text style={{ color: "#F87171", fontWeight: "bold", fontSize: 14, marginBottom: 10 }}>You have {queuedRides.length} unfinished rides</Text>
+          <View style={{ backgroundColor: "#f4433622", borderWidth: 1, borderColor: "#f44336", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <Text style={{ color: "#f44336", fontWeight: "bold", fontSize: 14, marginBottom: 10 }}>You have {queuedRides.length} unfinished rides</Text>
             {queuedRides.map((ride, i) => (
-              <TouchableOpacity key={ride.id} onPress={() => resumeUnfinishedRide(ride)} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: "#F8717144" }}>
+              <TouchableOpacity key={ride.id} onPress={() => resumeUnfinishedRide(ride)} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: "#f4433644" }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: "#F4F6FB", fontSize: 13 }}>To: {ride.dropoff}</Text>
                   <Text style={{ color: "#8A9BB8", fontSize: 11 }}>GHS {ride.price}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#F87171" />
+                <Ionicons name="chevron-forward" size={18} color="#f44336" />
               </TouchableOpacity>
             ))}
           </View>
         )}
 
-        <View style={{ borderRadius: 12, overflow: "hidden", marginBottom: 16, position: "relative" }}>
+        <View style={{ borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
           <WebView
-            style={{ width: "100%", height: 300 }}
+            style={{ width: "100%", height: 160 }}
+            pointerEvents="none"
             source={{
               html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}@keyframes pulse{0%{transform:scale(0.6);opacity:0.7}70%{transform:scale(2.4);opacity:0}100%{opacity:0}}.pulse-ring{width:14px;height:14px;border-radius:50%;background:#2DD4BF;animation:pulse 2s ease-out infinite}</style></head><body><div id="map"></div><script>
                 var myLat=${location?.latitude || 6.6}, myLng=${location?.longitude || -0.9};
-                var map=L.map("map",{zoomControl:true,attributionControl:false,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true}).setView([myLat,myLng],15);
+                var map=L.map("map",{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false}).setView([myLat,myLng],15);
                 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
                 var meIcon=L.divIcon({html:'<div style="position:relative;width:38px;height:46px;">${online ? '<div class="pulse-ring" style="position:absolute;left:12px;top:16px;"></div>' : ''}<svg width="38" height="46" viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg" style="position:relative;"><path d="M19 0C8.5 0 0 8.5 0 19c0 13.3 19 27 19 27s19-13.7 19-27C38 8.5 29.5 0 19 0z" fill="#0B1220" stroke="#2DD4BF" stroke-width="2"/><path d="M11 22.5l1.3-4c.2-.6.8-1 1.4-1h10.6c.6 0 1.2.4 1.4 1l1.3 4v5.5c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7v-1H15v1c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7V22.5z" fill="#2DD4BF"/><circle cx="14.5" cy="25.5" r="1.3" fill="#0B1220"/><circle cx="23.5" cy="25.5" r="1.3" fill="#0B1220"/></svg></div>',iconSize:[38,46],iconAnchor:[19,46],className:"me-marker"});
                 L.marker([myLat,myLng],{icon:meIcon}).addTo(map);
               </script></body></html>`
             }}
           />
-          <TouchableOpacity
-            onPress={() => setFullMapView({ lat: null, lng: null, label: "Your Location", mode: "driver" })}
-            style={{ position: "absolute", top: 10, right: 10, backgroundColor: "#0B1220E6", borderRadius: 20, width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="expand" size={18} color="#2DD4BF" />
-          </TouchableOpacity>
         </View>
 
         <View style={s.onlineRow}>
@@ -5168,25 +4740,25 @@ export default function App() {
         </TouchableOpacity>
         {user?.role === "motorbike_rider" && (
           <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("availableFoodDeliveries")}>
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#F5A62322", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
-              <Ionicons name="fast-food" size={26} color="#F5A623" />
+            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#ff980022", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+              <Ionicons name="fast-food" size={26} color="#ff9800" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.cardTitle}>Food Deliveries</Text>
               <Text style={s.cardSub}>See restaurant orders ready for pickup</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#F5A623" />
+            <Ionicons name="chevron-forward" size={20} color="#ff9800" />
           </TouchableOpacity>
         )}
         <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("driverLostItems")}>
-          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#5B8FE022", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
-            <Ionicons name="search" size={26} color="#5B8FE0" />
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2196f322", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="search" size={26} color="#2196f3" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>Lost & Found</Text>
             <Text style={s.cardSub}>Items clients reported leaving in your vehicle</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#5B8FE0" />
+          <Ionicons name="chevron-forward" size={20} color="#2196f3" />
         </TouchableOpacity>
         <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("driverEarnings")}>
           <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
@@ -5199,14 +4771,14 @@ export default function App() {
           <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
         </TouchableOpacity>
         <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("driverProfile")}>
-          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#5B8FE022", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
-            <Ionicons name="person" size={26} color="#5B8FE0" />
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2196f322", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="person" size={26} color="#2196f3" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.cardTitle}>My Profile</Text>
             <Text style={s.cardSub}>View and update your driver profile</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#5B8FE0" />
+          <Ionicons name="chevron-forward" size={20} color="#2196f3" />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -5220,19 +4792,17 @@ export default function App() {
         <Text style={s.navLogo}>Incoming Orders</Text>
         <View />
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 20 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => handleRefresh(fetchDriverBookings)} tintColor="#2DD4BF" colors={["#2DD4BF"]} />}>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
         {!online
           ? <EmptyState icon="moon-outline" title="You're offline" subtitle="Go online from your home screen to start receiving ride requests. While you're offline, new requests won't come through." />
           : driverBookings.length === 0
           ? <EmptyState icon="car-outline" title="No requests right now" subtitle="Stay online and keep close to busy areas — new ride requests will land here the moment they come in." />
           : driverBookings.map((b, i) => (
-            <View key={i} style={[s.card, b.status === "scheduled" && { borderColor: "#5B8FE0", borderWidth: 1 }]}>
+            <View key={i} style={[s.card, b.status === "scheduled" && { borderColor: "#2196f3", borderWidth: 1 }]}>
               <Text style={s.cardTitle}><Ionicons name={b.status === "scheduled" ? "calendar" : "car-sport"} size={15} color="#F4F6FB" /> {b.status === "scheduled" ? "Scheduled Ride" : "Ride Request"}</Text>
               {b.scheduled_for && (
-                <Text style={{ color: "#5B8FE0", fontWeight: "bold", marginTop: 4 }}>
-                  <Ionicons name="time" size={13} color="#5B8FE0" /> Pickup: {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                <Text style={{ color: "#2196f3", fontWeight: "bold", marginTop: 4 }}>
+                  <Ionicons name="time" size={13} color="#2196f3" /> Pickup: {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </Text>
               )}
               <Text style={{ color: "#8A9BB8", marginTop: 4 }}><Ionicons name="location" size={13} color="#8A9BB8" /> From: {b.pickup}</Text>
@@ -5240,7 +4810,7 @@ export default function App() {
               <Text style={{ color: "#2DD4BF", fontWeight: "bold", marginTop: 6 }}>GHS {b.price}</Text>
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                 <View style={[s.badge, { backgroundColor: b.status === "pending" ? "#2a2000" : b.status === "scheduled" ? "#0a1a2a" : b.status === "accepted" ? "#1a3a1a" : "#1a1a2a" }]}>
-                  <Text style={{ color: b.status === "pending" ? "#f5a623" : b.status === "scheduled" ? "#5B8FE0" : b.status === "accepted" ? "#2DD4BF" : "#8A9BB8", fontSize: 12 }}>{b.status?.toUpperCase()}</Text>
+                  <Text style={{ color: b.status === "pending" ? "#f5a623" : b.status === "scheduled" ? "#2196f3" : b.status === "accepted" ? "#2DD4BF" : "#8A9BB8", fontSize: 12 }}>{b.status?.toUpperCase()}</Text>
                 </View>
               </View>
               {(b.status === "pending" || b.status === "scheduled") && (
@@ -5279,29 +4849,18 @@ export default function App() {
         </View>
 
         <Text style={s.sectionTitle}>LIVE MAP</Text>
-        <Tappable onPress={() => openFullMap(driverArrivedAt ? activeOrder?.dropoff : activeOrder?.pickup, driverArrivedAt ? "Dropoff" : "Pickup", "driver")} style={{ position: "relative" }}>
-          <WebView
-            pointerEvents="none"
-            style={{ width: "100%", height: 300, borderRadius: 12, marginBottom: 12 }}
-            source={{
-              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
-                var myLat=${location?.latitude || 6.6}, myLng=${location?.longitude || -0.9};
-                var map=L.map("map",{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false}).setView([myLat,myLng],14);
-                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-                var meIcon=L.divIcon({html:'<svg width="34" height="42" viewBox="0 0 34 42" xmlns="http://www.w3.org/2000/svg"><path d="M17 0C7.6 0 0 7.6 0 17c0 12 17 25 17 25s17-13 17-25C34 7.6 26.4 0 17 0z" fill="#2DD4BF"/><circle cx="17" cy="17" r="6" fill="#0B1220"/></svg>',iconSize:[34,42],iconAnchor:[17,42],className:"me-marker"});
-                L.marker([myLat,myLng],{icon:meIcon}).addTo(map).bindPopup("You").openPopup();
-              </script></body></html>`
-            }}
-          />
-          <View style={{ position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#0B1220E6", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 }}>
-              <Ionicons name="navigate" size={15} color="#2DD4BF" />
-              <Text style={{ color: "#F4F6FB", fontSize: 12, fontWeight: "600", marginLeft: 6 }}>
-                Tap to view full map — {driverArrivedAt ? "dropoff" : "pickup"}
-              </Text>
-            </View>
-          </View>
-        </Tappable>
+        <WebView
+          style={{ width: "100%", height: 220, borderRadius: 12, marginBottom: 12 }}
+          source={{
+            html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+              var myLat=${location?.latitude || 6.6}, myLng=${location?.longitude || -0.9};
+              var map=L.map("map",{attributionControl:false}).setView([myLat,myLng],14);
+              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+              var meIcon=L.divIcon({html:'<svg width="34" height="42" viewBox="0 0 34 42" xmlns="http://www.w3.org/2000/svg"><path d="M17 0C7.6 0 0 7.6 0 17c0 12 17 25 17 25s17-13 17-25C34 7.6 26.4 0 17 0z" fill="#2DD4BF"/><circle cx="17" cy="17" r="6" fill="#0B1220"/></svg>',iconSize:[34,42],iconAnchor:[17,42],className:"me-marker"});
+              L.marker([myLat,myLng],{icon:meIcon}).addTo(map).bindPopup("You").openPopup();
+            </script></body></html>`
+          }}
+        />
 
         <Text style={s.sectionTitle}>IN-APP CHAT</Text>
         <View style={{ backgroundColor: "#131C2E", borderRadius: 12, padding: 12, marginBottom: 8, minHeight: 120 }}>
@@ -5310,43 +4869,23 @@ export default function App() {
             : chatMessages.map((m, i) => (
               <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
                 <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                {m.image_url
-                  ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                  : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>
               </View>
             ))
           }
         </View>
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-          <TouchableOpacity
-            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
-            disabled={uploadingChatPhoto}
-            onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
-            {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
-          </TouchableOpacity>
           <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
           <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
             <Text style={s.btnTxt}>Send</Text>
           </TouchableOpacity>
         </View>
 
-        {driverArrivedAt && !tripStarted && (
-          <View style={[s.card, { borderColor: waitingCharge > 0 ? "#f5a623" : "#2DD4BF", borderWidth: 1 }]}>
-            {waitingCharge > 0 ? (
-              <>
-                <Text style={{ color: "#f5a623", fontWeight: "bold", textAlign: "center" }}><Ionicons name="time" size={14} color="#f5a623" /> Waiting Charge Active</Text>
-                <Text style={{ color: "#F4F6FB", fontSize: 24, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {waitingCharge}</Text>
-                <Text style={{ color: "#8A9BB8", fontSize: 12, textAlign: "center" }}>GHS 1/min — auto-cancel at 15 mins total</Text>
-              </>
-            ) : (
-              <>
-                <Text style={{ color: "#2DD4BF", fontWeight: "bold", textAlign: "center" }}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Arrived — waiting for client</Text>
-                <Text style={{ color: "#F4F6FB", fontSize: 28, fontWeight: "bold", textAlign: "center", marginTop: 6 }}>
-                  {String(Math.floor((300 - waitingSecondsElapsed) / 60)).padStart(2, "0")}:{String(Math.max(0, 300 - waitingSecondsElapsed) % 60).padStart(2, "0")}
-                </Text>
-                <Text style={{ color: "#8A9BB8", fontSize: 12, textAlign: "center", marginTop: 2 }}>free time remaining before waiting charges begin</Text>
-              </>
-            )}
+        {waitingCharge > 0 && (
+          <View style={[s.card, { borderColor: "#f5a623", borderWidth: 1 }]}>
+            <Text style={{ color: "#f5a623", fontWeight: "bold", textAlign: "center" }}><Ionicons name="time" size={14} color="#f5a623" /> Waiting Charge Active</Text>
+            <Text style={{ color: "#F4F6FB", fontSize: 24, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {waitingCharge}</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, textAlign: "center" }}>GHS 1/min after 5 free minutes — auto-cancel at 15 mins</Text>
           </View>
         )}
 
@@ -5354,13 +4893,13 @@ export default function App() {
           <TouchableOpacity style={[s.btnGreen, { marginBottom: 8 }]} onPress={() => activeBookingId && startWaitingTimer(activeBookingId)}>
             <Text style={{ color: "#2DD4BF", fontWeight: "bold" }}>{"📍"} I Have Arrived at Pickup</Text>
           </TouchableOpacity>
-        ) : !tripStarted ? (
-          <TouchableOpacity style={[s.btn, { marginBottom: 8 }]} onPress={startTrip}>
-            <Text style={s.btnTxt}><Ionicons name="play" size={16} color="#04231F" /> Client Is Here — Start Trip</Text>
-          </TouchableOpacity>
-        ) : null}
+        ) : (
+          <View style={[s.card, { borderColor: "#2DD4BF", borderWidth: 1 }]}>
+            <Text style={{ color: "#2DD4BF", textAlign: "center", fontWeight: "bold" }}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Arrived — waiting for client</Text>
+          </View>
+        )}
 
-        {tripStarted && activeOrder?.service === "motorbike" && (
+        {activeOrder?.service === "motorbike" && (
           <>
             {!rideArrivedAtDelivery ? (
               <TouchableOpacity style={[s.btnGreen, { marginBottom: 12 }]} onPress={() => setRideArrivedAtDelivery(true)}>
@@ -5379,14 +4918,14 @@ export default function App() {
           </>
         )}
 
-        {tripStarted && (activeOrder?.service !== "motorbike" || rideArrivedAtDelivery) && (
-          <Tappable style={s.btn} onPress={completeRide}>
+        {(activeOrder?.service !== "motorbike" || rideArrivedAtDelivery) && (
+          <TouchableOpacity style={s.btn} onPress={completeRide}>
             <Text style={s.btnTxt}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Mark Ride Complete</Text>
-          </Tappable>
+          </TouchableOpacity>
         )}
 
         {sosCountdown > 0 ? (
-          <View style={[s.sosBtn, { backgroundColor: "#F87171", borderColor: "#F87171" }]}>
+          <View style={[s.sosBtn, { backgroundColor: "#f44336", borderColor: "#f44336" }]}>
             <Text style={{ color: "#F4F6FB", fontWeight: "bold" }}>Sending SOS in {sosCountdown}...</Text>
             <TouchableOpacity onPress={cancelSosCountdown} style={{ marginTop: 6 }}>
               <Text style={{ color: "#F4F6FB", textDecorationLine: "underline" }}>Cancel</Text>
@@ -5394,10 +4933,10 @@ export default function App() {
           </View>
         ) : (
           <TouchableOpacity
-            style={[s.sosBtn, sosHolding && { backgroundColor: "#F87171", borderColor: "#F87171" }]}
+            style={[s.sosBtn, sosHolding && { backgroundColor: "#f44336", borderColor: "#f44336" }]}
             onPressIn={startSosHold}
             onPressOut={cancelSosHold}>
-            <Text style={{ color: sosHolding ? "#F4F6FB" : "#F87171", fontWeight: "bold", fontSize: 13 }}>
+            <Text style={{ color: sosHolding ? "#F4F6FB" : "#f44336", fontWeight: "bold", fontSize: 13 }}>
               {sosHolding ? "Keep holding..." : "Hold for SOS"}
             </Text>
           </TouchableOpacity>
@@ -5415,12 +4954,10 @@ export default function App() {
         <Text style={s.navLogo}>My Earnings</Text>
         <View />
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 20 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => handleRefresh(fetchWallet, fetchDriverRating)} tintColor="#2DD4BF" colors={["#2DD4BF"]} />}>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
         {driverWallet?.balance < 0 && (
-          <View style={{ backgroundColor: "#F8717122", borderWidth: 1, borderColor: "#F87171", borderRadius: 12, padding: 14, marginBottom: 16 }}>
-            <Text style={{ color: "#F87171", fontWeight: "bold", fontSize: 14, marginBottom: 4 }}>You owe GHS {Math.abs(driverWallet.balance).toFixed(2)} to Luma</Text>
+          <View style={{ backgroundColor: "#f4433622", borderWidth: 1, borderColor: "#f44336", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <Text style={{ color: "#f44336", fontWeight: "bold", fontSize: 14, marginBottom: 4 }}>You owe GHS {Math.abs(driverWallet.balance).toFixed(2)} to Luma</Text>
             <Text style={{ color: "#F4F6FB", fontSize: 12, lineHeight: 17 }}>
               This comes from cash rides/deliveries — you collected the full amount in person, but only part of it was actually yours to keep. It'll clear automatically as you complete more MoMo/Card trips.
             </Text>
@@ -5436,7 +4973,7 @@ export default function App() {
         </View>
         <Text style={s.sectionTitle}>WITHDRAW EARNINGS</Text>
         <TouchableOpacity style={s.btnGreen} onPress={withdrawEarnings}>
-          <Text style={{ color: "#2DD4BF", fontWeight: "bold" }}><Ionicons name="phone-portrait" size={18} color="#5B8FE0" /> Withdraw via MoMo</Text>
+          <Text style={{ color: "#2DD4BF", fontWeight: "bold" }}><Ionicons name="phone-portrait" size={18} color="#2196f3" /> Withdraw via MoMo</Text>
         </TouchableOpacity>
         <Text style={{ color: "#5A6B85", fontSize: 12, textAlign: "center", marginTop: 8 }}>Minimum withdrawal: GHS 10 | Max GHS 2,000/day | Always free</Text>
       </ScrollView>
@@ -5508,13 +5045,13 @@ export default function App() {
         </View>
 
         <Text style={s.sectionTitle}>SUPPORT</Text>
-        <TouchableOpacity style={s.card} onPress={() => go("helpSupport")}>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("Contact Support", "Email: Luma43@gmail.com\nPhone: 0257638694")}>
           <Text style={s.cardTitle}><Ionicons name="chatbubble" size={18} color="#2DD4BF" /> Help & Support</Text>
-          <Text style={s.cardSub}>FAQs, contact options, and how things work</Text>
+          <Text style={s.cardSub}>Get help with a ride, payment, or account issue</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.card} onPress={() => go("aboutLuma")}>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("About Luma", "Ghana's own super app for rides, delivery, food and home services.")}>
           <Text style={s.cardTitle}><Ionicons name="information-circle" size={18} color="#2DD4BF" /> About Luma</Text>
-          <Text style={s.cardSub}>Our mission, what we offer, and version info</Text>
+          <Text style={s.cardSub}>Version 1.0.0</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={logout}><Text style={s.btnOutTxt}>Log Out</Text></TouchableOpacity>
@@ -5526,26 +5063,17 @@ export default function App() {
   if (screen === "clientHome") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <TouchableOpacity onPress={() => go("clientSettings")} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Ionicons name="settings-outline" size={22} color="#2DD4BF" />
-        </TouchableOpacity>
         <Wordmark fontSize={18} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
           <TouchableOpacity onPress={() => go("notifications")} style={{ position: "relative" }}>
             <Ionicons name="notifications-outline" size={22} color="#2DD4BF" />
             {unreadCount > 0 && (
-              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#F87171", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
+              <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#f44336", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 }}>
                 <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
               </View>
             )}
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => go("clientProfile")}>
-            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: "#2DD4BF22", borderWidth: 1.5, borderColor: "#2DD4BF", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-              {user?.profilePhoto
-                ? <Image source={{ uri: user.profilePhoto }} style={{ width: 32, height: 32 }} />
-                : <Text style={{ color: "#2DD4BF", fontSize: 14, fontWeight: "800" }}>{(user?.name || "U").charAt(0).toUpperCase()}</Text>}
-            </View>
-          </TouchableOpacity>
+          <TouchableOpacity onPress={() => go("clientProfile")}><Text style={s.navLink}><Ionicons name="person" size={16} color="#2DD4BF" /> Profile</Text></TouchableOpacity>
         </View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
@@ -5562,7 +5090,7 @@ export default function App() {
         <Tappable onPress={() => go("bookRide")} style={{ marginBottom: 20 }}>
           <View style={{ borderRadius: 16, overflow: "hidden" }}>
             <WebView
-              style={{ width: "100%", height: 320 }}
+              style={{ width: "100%", height: 180 }}
               pointerEvents="none"
               source={{
                 html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}@keyframes pulse{0%{transform:scale(0.6);opacity:0.7}70%{transform:scale(2.4);opacity:0}100%{opacity:0}}.pulse-ring{width:14px;height:14px;border-radius:50%;background:#2DD4BF;animation:pulse 2s ease-out infinite}</style></head><body><div id="map"></div><script>
@@ -5574,11 +5102,6 @@ export default function App() {
                 </script></body></html>`
               }}
             />
-            <TouchableOpacity
-              onPress={() => setFullMapView({ lat: null, lng: null, label: "Your Location", mode: "client" })}
-              style={{ position: "absolute", top: 10, right: 10, backgroundColor: "#0B1220E6", borderRadius: 20, width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="expand" size={18} color="#2DD4BF" />
-            </TouchableOpacity>
             <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#0B1220E6", paddingVertical: 10, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={{ color: "#F4F6FB", fontSize: 13, fontWeight: "600" }}>Tap to book a ride</Text>
               <Ionicons name="arrow-forward-circle" size={22} color="#2DD4BF" />
@@ -5590,7 +5113,7 @@ export default function App() {
 
         {/* Hero card — Car Ride is the primary action, given full width and more visual weight */}
         <FadeInUp index={0}>
-          <Tappable onPress={() => { setSelectedService("car"); setScheduleRide(false); go("bookRide"); }} style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 12 }]}>
+          <Tappable onPress={() => { setSelectedService("car"); go("bookRide"); }} style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 12 }]}>
             <View style={{ width: 58, height: 58, borderRadius: 29, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 16, overflow: "hidden" }}>
               <Image source={ICON_CAR} style={{ width: 44, height: 44 }} resizeMode="contain" />
             </View>
@@ -5605,9 +5128,9 @@ export default function App() {
         {/* Secondary services — 2-column grid */}
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
           {[
-            [ICON_TUKTUK, "Tuk Tuk", "Short trips", "tuktuk", "#F5A623", false],
+            [ICON_TUKTUK, "Tuk Tuk", "Short trips", "tuktuk", "#ff9800", false],
             [ICON_MOTORBIKE, "Motorbike", "Fast delivery", "motorbike", "#ff5722", false],
-            [ICON_HOURLY, "Hourly Hire", "By the hour", "hire", "#5B8FE0", false],
+            [ICON_HOURLY, "Hourly Hire", "By the hour", "hire", "#2196f3", false],
             [ICON_FOOD, "Food Delivery", "Restaurants", "food", "#2DD4BF", false],
           ].map(([iconSrc, title, sub, type, color, soon], i) => (
             <FadeInUp key={title as string} index={i + 1} style={{ width: "48%", marginBottom: 12 }}>
@@ -5617,7 +5140,6 @@ export default function App() {
                   if (type === "hire") { go("hourlyHire"); return; }
                   if (type === "food") { go("foodDelivery"); return; }
                   setSelectedService(type as string);
-                  setScheduleRide(false);
                   go("bookRide");
                 }}
                 style={[s.card, { alignItems: "flex-start", opacity: soon ? 0.6 : 1 }]}>
@@ -5664,25 +5186,35 @@ export default function App() {
           </View>
           <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.card, { flexDirection: "row", alignItems: "center" }]}
-          onPress={() => {
-            setSelectedService("car");
-            setScheduleRide(true);
-            setScheduledDay(null);
-            setScheduledTime(null);
-            setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null);
-            setEstFare(null); setEstKm(null);
-            go("bookRide");
-          }}>
-          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#5B8FE022", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
-            <Ionicons name="calendar" size={26} color="#5B8FE0" />
+        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("emergencyContacts")}>
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#f4433622", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="shield-checkmark" size={26} color="#f44336" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Schedule a Ride</Text>
-            <Text style={s.cardSub}>Book up to 7 days ahead for a specific time</Text>
+            <Text style={s.cardTitle}>Safety & Emergency Contacts</Text>
+            <Text style={s.cardSub}>Add people to be notified if you use SOS</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#5B8FE0" />
+          <Ionicons name="chevron-forward" size={20} color="#f44336" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("myLostItems")}>
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2196f322", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="search" size={26} color="#2196f3" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>Lost & Found</Text>
+            <Text style={s.cardSub}>Track items you've reported leaving behind</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#2196f3" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("myRefundRequests")}>
+          <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#8A9BB822", alignItems: "center", justifyContent: "center", marginRight: 16 }}>
+            <Ionicons name="cash" size={26} color="#8A9BB8" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>Refund Requests</Text>
+            <Text style={s.cardSub}>Track the status of any refunds you've requested</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8A9BB8" />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -5690,13 +5222,13 @@ export default function App() {
   if (screen === "emergencyContacts") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <TouchableOpacity onPress={() => go("clientSettings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
         <Text style={s.navLogo}>Safety</Text>
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-          <Ionicons name="shield-checkmark" size={22} color="#F87171" />
+          <Ionicons name="shield-checkmark" size={22} color="#f44336" />
           <Text style={{ color: "#F4F6FB", fontSize: 20, fontWeight: "700", marginLeft: 8 }}>Emergency Contacts</Text>
         </View>
         <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 20, lineHeight: 19 }}>
@@ -5705,11 +5237,11 @@ export default function App() {
 
         <Text style={s.sectionTitle}>YOUR CONTACTS</Text>
         {emergencyContacts.length === 0
-          ? <EmptyState icon="person-add-outline" title="No contacts yet" subtitle="Add someone below who should be notified if you ever use the SOS button." />
+          ? <Text style={{ color: "#5A6B85", fontSize: 13, marginBottom: 16 }}>No contacts saved yet.</Text>
           : emergencyContacts.map((c) => (
             <View key={c.id} style={[s.card, { flexDirection: "row", alignItems: "center" }]}>
-              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#F8717122", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-                <Ionicons name="person" size={20} color="#F87171" />
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#f4433622", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+                <Ionicons name="person" size={20} color="#f44336" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: "#F4F6FB", fontSize: 15, fontWeight: "600" }}>{c.name}</Text>
@@ -5732,9 +5264,9 @@ export default function App() {
           </>
         )}
 
-        <View style={{ backgroundColor: "#2a1a1a", borderWidth: 1, borderColor: "#F8717140", borderRadius: 12, padding: 14, marginTop: 20 }}>
+        <View style={{ backgroundColor: "#2a1a1a", borderWidth: 1, borderColor: "#f4433640", borderRadius: 12, padding: 14, marginTop: 20 }}>
           <Text style={{ color: "#8A9BB8", fontSize: 12, lineHeight: 18 }}>
-            <Ionicons name="information-circle" size={14} color="#F87171" /> In an emergency, always call the police directly on 191. SOS shares your location with admin and records your contacts for follow-up.
+            <Ionicons name="information-circle" size={14} color="#f44336" /> In an emergency, always call the police directly on 191. SOS shares your location with admin and records your contacts for follow-up.
           </Text>
         </View>
       </ScrollView>
@@ -5751,9 +5283,7 @@ export default function App() {
         <Text style={s.navLogo}>Notifications</Text>
         <View />
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 20 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => handleRefresh(fetchNotifications)} tintColor="#2DD4BF" colors={["#2DD4BF"]} />}>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
         {notifications.length > 0 && unreadCount > 0 && (
           <TouchableOpacity onPress={markAllNotificationsRead} style={{ alignSelf: "flex-end", marginBottom: 12 }}>
             <Text style={{ color: "#2DD4BF", fontSize: 13, fontWeight: "600" }}>Mark all as read</Text>
@@ -6038,26 +5568,19 @@ export default function App() {
                   </Text>
                 </View>
               )}
-              <View style={{ position: "relative" }}>
-                <WebView
-                  style={{ width: "100%", height: 320, borderRadius: 12, marginBottom: 12 }}
-                  source={{
-                    html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
-                      var riderLat=${riderLiveLocation?.latitude || activeOrder?.delivery_lat || location?.latitude || 6.6};
-                      var riderLng=${riderLiveLocation?.longitude || activeOrder?.delivery_lng || location?.longitude || -0.9};
-                      var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true}).setView([riderLat,riderLng],15);
-                      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-                      var riderIcon=L.divIcon({html:'<svg width="38" height="46" viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg"><path d="M19 0C8.5 0 0 8.5 0 19c0 13.3 19 27 19 27s19-13.7 19-27C38 8.5 29.5 0 19 0z" fill="#0B1220" stroke="#FF5722" stroke-width="2"/><circle cx="19" cy="19" r="7" fill="#FF5722"/></svg>',iconSize:[38,46],iconAnchor:[19,46],className:"rider-marker"});
-                      L.marker([riderLat,riderLng],{icon:riderIcon}).addTo(map).bindPopup("Your Rider").openPopup();
-                    </script></body></html>`
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={() => openFullMap(activeOrder?.delivery_address, "Delivery Location", "client")}
-                  style={{ position: "absolute", top: 10, right: 10, backgroundColor: "#0B1220E6", borderRadius: 20, width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="expand" size={18} color="#2DD4BF" />
-                </TouchableOpacity>
-              </View>
+              <WebView
+                style={{ width: "100%", height: 260, borderRadius: 12, marginBottom: 12 }}
+                source={{
+                  html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+                    var riderLat=${riderLiveLocation?.latitude || activeOrder?.delivery_lat || location?.latitude || 6.6};
+                    var riderLng=${riderLiveLocation?.longitude || activeOrder?.delivery_lng || location?.longitude || -0.9};
+                    var map=L.map("map",{attributionControl:false}).setView([riderLat,riderLng],15);
+                    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+                    var riderIcon=L.divIcon({html:'<svg width="38" height="46" viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg"><path d="M19 0C8.5 0 0 8.5 0 19c0 13.3 19 27 19 27s19-13.7 19-27C38 8.5 29.5 0 19 0z" fill="#0B1220" stroke="#FF5722" stroke-width="2"/><circle cx="19" cy="19" r="7" fill="#FF5722"/></svg>',iconSize:[38,46],iconAnchor:[19,46],className:"rider-marker"});
+                    L.marker([riderLat,riderLng],{icon:riderIcon}).addTo(map).bindPopup("Your Rider").openPopup();
+                  </script></body></html>`
+                }}
+              />
               {riderLiveLocation
                 ? <Text style={{ color: "#2DD4BF", textAlign: "center", marginBottom: 12 }}>{"●"} Live — updating every 3 seconds</Text>
                 : <Text style={{ color: "#8A9BB8", textAlign: "center", marginBottom: 12 }}>Waiting for rider location...</Text>
@@ -6141,47 +5664,23 @@ export default function App() {
           ) : (
             <>
               <Text style={s.sectionTitle}>NAVIGATE TO CLIENT</Text>
-              <View style={{ position: "relative" }}>
-                <WebView
-                  style={{ width: "100%", height: 300, borderRadius: 12, marginBottom: 16 }}
-                  source={{
-                    html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
-                      var myLat=${riderLiveLocation?.latitude || location?.latitude || 6.6};
-                      var myLng=${riderLiveLocation?.longitude || location?.longitude || -0.9};
-                      var destLat=${activeDelivery?.delivery_lat || myLat};
-                      var destLng=${activeDelivery?.delivery_lng || myLng};
-                      var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true}).fitBounds([[myLat,myLng],[destLat,destLng]],{padding:[30,30]});
-                      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-                      fetch("https://router.project-osrm.org/route/v1/driving/" + myLng + "," + myLat + ";" + destLng + "," + destLat + "?overview=full&geometries=geojson")
-                        .then(function(r){ return r.json(); })
-                        .then(function(data){
-                          if (data && data.routes && data.routes[0] && data.routes[0].geometry) {
-                            var coords = data.routes[0].geometry.coordinates.map(function(c){ return [c[1], c[0]]; });
-                            L.polyline(coords, {color:"#2DD4BF", weight:5, opacity:0.85, lineJoin:"round"}).addTo(map);
-                          } else {
-                            L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:3, opacity:0.6, dashArray:"6,8"}).addTo(map);
-                          }
-                        }).catch(function(){
-                          L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:3, opacity:0.6, dashArray:"6,8"}).addTo(map);
-                        });
-                      var meIcon=L.divIcon({html:'<div style="width:20px;height:20px;background:#FF5722;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4);"></div>',iconSize:[20,20],className:""});
-                      var destIcon=L.divIcon({html:'<svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg"><path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 24 16 24s16-12.8 16-24C32 7.2 24.8 0 16 0z" fill="#2DD4BF"/><circle cx="16" cy="16" r="6" fill="#04231F"/></svg>',iconSize:[32,40],iconAnchor:[16,40],className:""});
-                      L.marker([myLat,myLng],{icon:meIcon}).addTo(map).bindPopup("You");
-                      L.marker([destLat,destLng],{icon:destIcon}).addTo(map).bindPopup("Client");
-                    </script></body></html>`
-                  }}
-                />
-                <TouchableOpacity
-                  onPress={() => setFullMapView({
-                    lat: activeDelivery?.delivery_lat || riderLiveLocation?.latitude || location?.latitude || 6.6,
-                    lng: activeDelivery?.delivery_lng || riderLiveLocation?.longitude || location?.longitude || -0.9,
-                    label: "Client Location",
-                    mode: "driver",
-                  })}
-                  style={{ position: "absolute", top: 10, right: 10, backgroundColor: "#0B1220E6", borderRadius: 20, width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="expand" size={18} color="#2DD4BF" />
-                </TouchableOpacity>
-              </View>
+              <WebView
+                style={{ width: "100%", height: 220, borderRadius: 12, marginBottom: 16 }}
+                source={{
+                  html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+                    var myLat=${riderLiveLocation?.latitude || location?.latitude || 6.6};
+                    var myLng=${riderLiveLocation?.longitude || location?.longitude || -0.9};
+                    var destLat=${activeDelivery?.delivery_lat || myLat};
+                    var destLng=${activeDelivery?.delivery_lng || myLng};
+                    var map=L.map("map",{attributionControl:false}).fitBounds([[myLat,myLng],[destLat,destLng]],{padding:[30,30]});
+                    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+                    var meIcon=L.divIcon({html:'<div style="width:20px;height:20px;background:#FF5722;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4);"></div>',iconSize:[20,20],className:""});
+                    var destIcon=L.divIcon({html:'<svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg"><path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 24 16 24s16-12.8 16-24C32 7.2 24.8 0 16 0z" fill="#2DD4BF"/><circle cx="16" cy="16" r="6" fill="#04231F"/></svg>',iconSize:[32,40],iconAnchor:[16,40],className:""});
+                    L.marker([myLat,myLng],{icon:meIcon}).addTo(map).bindPopup("You");
+                    L.marker([destLat,destLng],{icon:destIcon}).addTo(map).bindPopup("Client");
+                  </script></body></html>`
+                }}
+              />
               <Text style={s.sectionTitle}>DELIVERY PROOF</Text>
               <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>Take a photo showing the order was delivered — protects you if there's ever a dispute.</Text>
               <TouchableOpacity style={s.uploadBox} onPress={() => takeProofPhoto(setDeliveryProofPhoto)}>
@@ -6206,7 +5705,7 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-        <Text style={s.navLogo}>{scheduleRide ? "Schedule a Ride" : `Book a ${selectedService === "tuktuk" ? "Tuk Tuk" : selectedService === "motorbike" ? "Delivery" : "Ride"}`}</Text>
+        <Text style={s.navLogo}>Book a {selectedService === "tuktuk" ? "Tuk Tuk" : selectedService === "motorbike" ? "Delivery" : "Ride"}</Text>
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
@@ -6240,21 +5739,13 @@ export default function App() {
             ))}
           </View>
         )}
-        {homeAddress && dropoffText !== homeAddress.text && (
-          <Tappable
-            onPress={() => selDropoff({ name: homeAddress.text, lat: homeAddress.lat, lon: homeAddress.lng })}
-            style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#2DD4BF18", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 24, paddingVertical: 8, paddingHorizontal: 14, alignSelf: "flex-start", marginBottom: 14 }}>
-            <Ionicons name="home" size={15} color="#2DD4BF" />
-            <Text style={{ color: "#2DD4BF", fontSize: 13, fontWeight: "600", marginLeft: 6 }}>Use Home — {homeAddress.text.split(",")[0]}</Text>
-          </Tappable>
-        )}
 
         {extraStops.map((stop, index) => (
           <View key={index}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={s.sectionTitle}>STOP {index + 2}</Text>
               <TouchableOpacity onPress={() => removeStop(index)}>
-                <Text style={{ color: "#F87171", fontSize: 13 }}>Remove</Text>
+                <Text style={{ color: "#f44336", fontSize: 13 }}>Remove</Text>
               </TouchableOpacity>
             </View>
             <TextInput
@@ -6295,7 +5786,7 @@ export default function App() {
         </View>
 
         <WebView
-          style={{ width: "100%", height: 300, borderRadius: 12, marginBottom: 12 }}
+          style={{ width: "100%", height: 220, borderRadius: 12, marginBottom: 12 }}
           onMessage={async (e) => {
             try {
               const d = JSON.parse(e.nativeEvent.data);
@@ -6303,10 +5794,7 @@ export default function App() {
               setDropoffPin({ latitude: d.lat, longitude: d.lng });
               const address = await reverseGeocode(d.lat, d.lng);
               setDropoffText(address);
-              if (pickupPin) {
-                if (extraStops.some(s => s.pin)) recalcMultiStopFare(pickupPin, { latitude: d.lat, longitude: d.lng });
-                else updateFare(pickupPin.latitude, pickupPin.longitude, d.lat, d.lng);
-              }
+              if (pickupPin) updateFare(pickupPin.latitude, pickupPin.longitude, d.lat, d.lng);
             } catch (err) { }
           }}
           source={{
@@ -6332,9 +5820,24 @@ export default function App() {
           </View>
         )}
 
+        <Text style={s.sectionTitle}>WHEN DO YOU NEED THE RIDE?</Text>
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+          <TouchableOpacity
+            onPress={() => { setScheduleRide(false); setScheduledDay(null); setScheduledTime(null); }}
+            style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: !scheduleRide ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: !scheduleRide ? "#2DD4BF" : "#333", alignItems: "center" }}>
+            <Text style={{ fontSize: 18 }}>{"⚡"}</Text>
+            <Text style={{ color: !scheduleRide ? "#000" : "#F4F6FB", fontSize: 12, fontWeight: !scheduleRide ? "bold" : "normal" }}>Ride Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setScheduleRide(true)}
+            style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: scheduleRide ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: scheduleRide ? "#2DD4BF" : "#333", alignItems: "center" }}>
+            <Text style={{ fontSize: 18 }}><Ionicons name="calendar" size={14} color="#2196f3" /></Text>
+            <Text style={{ color: scheduleRide ? "#000" : "#F4F6FB", fontSize: 12, fontWeight: scheduleRide ? "bold" : "normal" }}>Schedule Later</Text>
+          </TouchableOpacity>
+        </View>
+
         {scheduleRide && (
           <>
-            <Text style={s.sectionTitle}>WHEN SHOULD THE RIDE BE?</Text>
             <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 8 }}>Select day (up to 7 days ahead):</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -6368,7 +5871,7 @@ export default function App() {
                 {scheduledTime && (
                   <View style={{ backgroundColor: "#1a2a1a", borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#2DD4BF" }}>
                     <Text style={{ color: "#2DD4BF", fontWeight: "bold", textAlign: "center" }}>
-                      <Ionicons name="calendar" size={14} color="#5B8FE0" /> Scheduled for {getNext7Days().find(d => d.key === scheduledDay)?.label} at {getTimeSlots(scheduledDay).find(t => t.key === scheduledTime)?.label}
+                      <Ionicons name="calendar" size={14} color="#2196f3" /> Scheduled for {getNext7Days().find(d => d.key === scheduledDay)?.label} at {getTimeSlots(scheduledDay).find(t => t.key === scheduledTime)?.label}
                     </Text>
                   </View>
                 )}
@@ -6379,13 +5882,13 @@ export default function App() {
 
         <Text style={s.sectionTitle}>PAYMENT METHOD</Text>
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-          {[["cash", "cash-outline", "Cash"], ["momo", "phone-portrait-outline", "MoMo"], ["card", "card-outline", "Card"]].map(([val, icon, label]) => (
+          {[["cash", "💵", "Cash"], ["momo", "📱", "MoMo"], ["card", "💳", "Card"]].map(([val, icon, label]) => (
             <TouchableOpacity
-              key={val as string}
-              onPress={() => setPaymentMethod(val as string)}
+              key={val}
+              onPress={() => setPaymentMethod(val)}
               style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: paymentMethod === val ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: paymentMethod === val ? "#2DD4BF" : "#333", alignItems: "center" }}>
-              <Ionicons name={icon as any} size={24} color={paymentMethod === val ? "#000" : "#F4F6FB"} />
-              <Text style={{ color: paymentMethod === val ? "#000" : "#F4F6FB", fontSize: 12, fontWeight: paymentMethod === val ? "bold" : "normal", marginTop: 4 }}>{label}</Text>
+              <Text style={{ fontSize: 20 }}>{icon}</Text>
+              <Text style={{ color: paymentMethod === val ? "#000" : "#F4F6FB", fontSize: 12, fontWeight: paymentMethod === val ? "bold" : "normal" }}>{label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -6406,7 +5909,7 @@ export default function App() {
                 <Text style={s.btnTxt}>Apply</Text>
               </TouchableOpacity>
             </View>
-            {promoError ? <Text style={{ color: "#F87171", fontSize: 12, marginBottom: 8 }}>{promoError}</Text> : null}
+            {promoError ? <Text style={{ color: "#f44336", fontSize: 12, marginBottom: 8 }}>{promoError}</Text> : null}
           </>
         ) : (
           <View style={{ backgroundColor: "#1a3a1a", borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#2DD4BF", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -6420,48 +5923,35 @@ export default function App() {
               )}
             </View>
             <TouchableOpacity onPress={removePromo}>
-              <Text style={{ color: "#F87171", fontSize: 13 }}>Remove</Text>
+              <Text style={{ color: "#f44336", fontSize: 13 }}>Remove</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {submittingRide ? (
-          <Pulse label="Booking your ride..." size={32} />
-        ) : (
-          <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={submitRide}>
-            <Text style={s.btnTxt}>
-              <Ionicons name="car-sport" size={16} color="#000" /> {promoApplied?.discount >= 100 ? "Book FREE Ride" : estFare && promoApplied ? `Book — GHS ${calcDiscountedFare(estFare)}` : "Confirm Booking"}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={submitRide}>
+          <Text style={s.btnTxt}>
+            <Ionicons name="car-sport" size={16} color="#000" /> {promoApplied?.discount >= 100 ? "Book FREE Ride" : estFare && promoApplied ? `Book — GHS ${calcDiscountedFare(estFare)}` : "Confirm Booking"}
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 
-  // CLIENT PROFILE — identity, bookings, favourites, home address, referral
+  // CLIENT PROFILE / SETTINGS
   if (screen === "clientProfile") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-        <Text style={s.navLogo}>Profile</Text>
+        <Text style={s.navLogo}>Profile & Settings</Text>
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={s.card}>
-          <TouchableOpacity onPress={uploadProfilePhoto} style={{ alignSelf: "center", marginBottom: 12 }}>
-            <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: "#2DD4BF18", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 2, borderColor: "#2DD4BF" }}>
-              {user?.profilePhoto
-                ? <Image source={{ uri: user.profilePhoto }} style={{ width: 88, height: 88 }} />
-                : <Ionicons name="person" size={40} color="#2DD4BF" />}
-            </View>
-            <View style={{ position: "absolute", bottom: 0, right: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#131C2E" }}>
-              <Ionicons name={uploadingPhoto ? "hourglass" : "camera"} size={15} color="#04231F" />
-            </View>
-          </TouchableOpacity>
-          <Text style={[s.cardTitle, { textAlign: "center" }]}>{user?.name}</Text>
-          <Text style={[s.cardSub, { textAlign: "center" }]}>{user?.email}</Text>
-          <Text style={[s.cardSub, { textAlign: "center" }]}>{user?.phone}</Text>
-          <View style={[s.badge, { backgroundColor: "#1a3a1a", marginTop: 8, alignSelf: "center" }]}>
+          <Text style={{ fontSize: 40, marginBottom: 8 }}><Ionicons name="person" size={16} color="#2DD4BF" /></Text>
+          <Text style={s.cardTitle}>{user?.name}</Text>
+          <Text style={s.cardSub}>{user?.email}</Text>
+          <Text style={s.cardSub}>{user?.phone}</Text>
+          <View style={[s.badge, { backgroundColor: "#1a3a1a", marginTop: 8 }]}>
             <Text style={{ color: "#2DD4BF", fontSize: 12 }}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Verified Client</Text>
           </View>
         </View>
@@ -6478,65 +5968,12 @@ export default function App() {
               <View key={i} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <Text style={{ color: "#F4F6FB" }}>{f.driver_name || "Driver"}</Text>
                 <TouchableOpacity onPress={() => removeFavouriteDriver(f.id, f.driver_name || "Driver")}>
-                  <Text style={{ color: "#F87171", fontSize: 12 }}>Remove</Text>
+                  <Text style={{ color: "#f44336", fontSize: 12 }}>Remove</Text>
                 </TouchableOpacity>
               </View>
             ))}
           </View>
         )}
-
-        <Text style={s.sectionTitle}>HOME ADDRESS</Text>
-        {homeAddress ? (
-          <View style={[s.card, { borderColor: "#2DD4BF", borderWidth: 1, flexDirection: "row", alignItems: "center" }]}>
-            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-              <Ionicons name="home" size={22} color="#2DD4BF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>Home</Text>
-              <Text style={s.cardSub} numberOfLines={2}>{homeAddress.text}</Text>
-            </View>
-            <TouchableOpacity onPress={removeHomeAddress}>
-              <Text style={{ color: "#F87171", fontSize: 12 }}>Remove</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={s.card}>
-            <Text style={s.cardSub}>Save your home address once, and it'll show up as a one-tap dropoff suggestion every time you book a ride.</Text>
-            <TextInput
-              style={[s.input, { marginTop: 12 }]}
-              placeholder="Search your home address..."
-              placeholderTextColor="#5A6B85"
-              value={homeAddressInput}
-              onChangeText={async (t) => {
-                setHomeAddressInput(t);
-                if (t.length >= 3) setHomeAddressSugg(await searchPlaces(t));
-                else setHomeAddressSugg([]);
-              }}
-            />
-            {homeAddressSugg.length > 0 && (
-              <View style={s.suggestBox}>
-                {homeAddressSugg.map((p, i) => (
-                  <TouchableOpacity key={i} style={s.suggestItem} onPress={() => {
-                    saveHomeAddress(p.name, p.lat, p.lon);
-                    setHomeAddressInput(""); setHomeAddressSugg([]);
-                  }}>
-                    <Text style={s.suggestTxt}><Ionicons name="location" size={13} color="#2DD4BF" style={{ marginRight: 4 }} /> {p.name.length > 60 ? p.name.substring(0, 60) + "..." : p.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-            <TouchableOpacity
-              style={[s.btnOut, { marginTop: 4 }]}
-              onPress={async () => {
-                if (!location) { Alert.alert("Location unavailable", "Please search for your address manually instead."); return; }
-                const address = await reverseGeocode(location.latitude, location.longitude);
-                saveHomeAddress(address, location.latitude, location.longitude);
-              }}>
-              <Text style={s.btnOutTxt}><Ionicons name="locate" size={14} color="#2DD4BF" /> Use My Current Location</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
         <View style={[s.card, { borderColor: "#2DD4BF", borderWidth: 1 }]}>
           <Text style={s.cardTitle}><Ionicons name="gift" size={18} color="#2DD4BF" /> Referral Code</Text>
           <Text style={{ color: "#2DD4BF", fontSize: 16, fontWeight: "bold", marginTop: 4 }}>{user?.referralCode || "Loading..."}</Text>
@@ -6546,157 +5983,17 @@ export default function App() {
           )}
         </View>
 
-        <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={logout}>
-          <Text style={s.btnOutTxt}>Log Out</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
-  );
-
-  // HELP & SUPPORT — real screen with FAQ and contact options, shared by client and driver
-  if (screen === "helpSupport") {
-    const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role);
-    const faqs = [
-      { q: "How do cancellations work?", a: "Cancelling before a driver accepts is always free. Within 3 minutes of acceptance is also free. After that, a small fee may apply — GHS 5 if the driver hasn't arrived yet, GHS 10 if they have." },
-      { q: "How do I pay for a ride?", a: "Choose Cash, Mobile Money, or Card when booking. Cash is paid directly to your driver. MoMo and Card are charged automatically once the ride is marked complete — never before." },
-      { q: "I left something in the vehicle — what now?", a: "Go to Settings → Lost & Found and report it from your ride history. Your driver is notified immediately and can confirm if they've found it." },
-      { q: "How does the SOS button work?", a: "Hold the SOS button for 3 seconds during any active ride. After a 3-second countdown (which you can cancel), your location is shared with Luma admin and your saved emergency contacts are notified." },
-      { q: "How do refunds work?", a: "If something goes wrong with a paid (MoMo/Card) order, request a refund from Settings → Refund Requests. An admin reviews it and you can track the status there." },
-      { q: "How do I become a driver?", a: "Log out and choose \"Create Account\" from the welcome screen, then select your role. Verification is quick — most applications are approved within a few hours." },
-    ];
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.nav}>
-          <TouchableOpacity onPress={() => go(isDriverRole ? "driverProfile" : "clientSettings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-          <Text style={s.navLogo}>Help & Support</Text>
-          <View />
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <Text style={s.sectionTitle}>CONTACT US</Text>
-          <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => Linking.openURL("mailto:luminalinks43@gmail.com")}>
-            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-              <Ionicons name="mail" size={22} color="#2DD4BF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>Email</Text>
-              <Text style={s.cardSub}>luminalinks43@gmail.com</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#2DD4BF" />
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => Linking.openURL("tel:0257638694")}>
-            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-              <Ionicons name="call" size={22} color="#2DD4BF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>Phone</Text>
-              <Text style={s.cardSub}>0257 638 694</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#2DD4BF" />
-          </TouchableOpacity>
-          <Text style={{ color: "#5A6B85", fontSize: 12, marginTop: 4, marginBottom: 4 }}>Support is available every day. Response times may be longer late at night.</Text>
-
-          <Text style={s.sectionTitle}>FREQUENTLY ASKED QUESTIONS</Text>
-          {faqs.map((item, i) => (
-            <View key={i} style={s.card}>
-              <Text style={s.cardTitle}>{item.q}</Text>
-              <Text style={[s.cardSub, { marginTop: 6, lineHeight: 19 }]}>{item.a}</Text>
-            </View>
-          ))}
-
-          <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go(isDriverRole ? "emergencyContacts" : "emergencyContacts")}>
-            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#F8717122", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-              <Ionicons name="shield-checkmark" size={22} color="#F87171" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.cardTitle}>Safety Center</Text>
-              <Text style={s.cardSub}>Manage emergency contacts and safety settings</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#F87171" />
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // ABOUT LUMA — real screen with mission, offerings, and version info
-  if (screen === "aboutLuma") {
-    const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role);
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.nav}>
-          <TouchableOpacity onPress={() => go(isDriverRole ? "driverProfile" : "clientSettings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-          <Text style={s.navLogo}>About Luma</Text>
-          <View />
-        </View>
-        <ScrollView contentContainerStyle={{ padding: 20, alignItems: "center" }}>
-          <View style={{ marginTop: 8, marginBottom: 4 }}><Wordmark fontSize={30} /></View>
-          <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 24, textAlign: "center" }}>Ghana's Own Super App</Text>
-
-          <View style={[s.card, { width: "100%" }]}>
-            <Text style={s.cardTitle}>Our Mission</Text>
-            <Text style={[s.cardSub, { marginTop: 6, lineHeight: 19 }]}>
-              Uber, Bolt, and similar apps mostly serve Accra and Kumasi — millions of people in Ghana's smaller towns are left out. Luma exists to bring reliable, affordable rides and delivery to every town in Ghana, starting right here in Asamankese.
-            </Text>
-          </View>
-
-          <View style={[s.card, { width: "100%" }]}>
-            <Text style={s.cardTitle}>What Luma Offers</Text>
-            {[
-              ["car-sport", "Car Rides", "Point-to-point rides in private cars"],
-              ["car", "Tuk Tuk", "Affordable short-distance local trips"],
-              ["bicycle", "Motorbike Delivery", "Fast parcel and errand delivery"],
-              ["fast-food", "Food Delivery", "Order from local restaurants and vendors"],
-            ].map(([icon, title, sub]) => (
-              <View key={title as string} style={{ flexDirection: "row", alignItems: "center", marginTop: 12 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 12 }}>
-                  <Ionicons name={icon as any} size={18} color="#2DD4BF" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: "#F4F6FB", fontSize: 14, fontWeight: "600" }}>{title}</Text>
-                  <Text style={{ color: "#8A9BB8", fontSize: 12 }}>{sub}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          <View style={[s.card, { width: "100%" }]}>
-            <Text style={s.cardTitle}>Built in Ghana</Text>
-            <Text style={[s.cardSub, { marginTop: 6, lineHeight: 19 }]}>
-              Luma is founded by Lumina, a student at Presec Legon in Asamankese, Eastern Region — proof that age and location aren't a barrier to building something that serves your whole community.
-            </Text>
-          </View>
-
-          <TouchableOpacity style={[s.card, { width: "100%" }]} onPress={() => Alert.alert("Legal", "Full Terms of Service and Privacy Policy will be published here ahead of launch.")}>
-            <Text style={s.cardTitle}><Ionicons name="document-text" size={16} color="#2DD4BF" /> Terms & Privacy</Text>
-            <Text style={s.cardSub}>Coming soon</Text>
-          </TouchableOpacity>
-
-          <Text style={{ color: "#5A6B85", fontSize: 12, marginTop: 12 }}>Version 1.0.0</Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // CLIENT SETTINGS — payment preference, notifications, safety setup, support
-  if (screen === "clientSettings") return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.nav}>
-        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-        <Text style={s.navLogo}>Settings</Text>
-        <View />
-      </View>
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={s.sectionTitle}>PAYMENT PREFERENCE</Text>
         <View style={s.card}>
           <Text style={s.cardSub}>Default payment method for new bookings</Text>
           <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-            {[["cash", "cash-outline", "Cash"], ["momo", "phone-portrait-outline", "MoMo"], ["card", "card-outline", "Card"]].map(([val, icon, label]) => (
+            {[["cash", "💵", "Cash"], ["momo", "📱", "MoMo"], ["card", "💳", "Card"]].map(([val, icon, label]) => (
               <TouchableOpacity
-                key={val as string}
-                onPress={() => setPaymentMethod(val as string)}
+                key={val}
+                onPress={() => setPaymentMethod(val)}
                 style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: paymentMethod === val ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: paymentMethod === val ? "#2DD4BF" : "#333", alignItems: "center" }}>
-                <Ionicons name={icon as any} size={20} color={paymentMethod === val ? "#000" : "#F4F6FB"} />
-                <Text style={{ color: paymentMethod === val ? "#000" : "#F4F6FB", fontSize: 11, fontWeight: paymentMethod === val ? "bold" : "normal", marginTop: 4 }}>{label}</Text>
+                <Text style={{ fontSize: 18 }}>{icon}</Text>
+                <Text style={{ color: paymentMethod === val ? "#000" : "#F4F6FB", fontSize: 11, fontWeight: paymentMethod === val ? "bold" : "normal" }}>{label}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -6718,46 +6015,18 @@ export default function App() {
           </View>
         </View>
 
-        <Text style={s.sectionTitle}>SAFETY & TRACKING</Text>
-        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("emergencyContacts")}>
-          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#F8717122", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-            <Ionicons name="shield-checkmark" size={22} color="#F87171" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Safety & Emergency Contacts</Text>
-            <Text style={s.cardSub}>Add people to be notified if you use SOS</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#F87171" />
+        <Text style={s.sectionTitle}>SUPPORT</Text>
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("Contact Support", "Email: Luma43@gmail.com\nPhone: 0257638694")}>
+          <Text style={s.cardTitle}><Ionicons name="chatbubble" size={18} color="#2DD4BF" /> Help & Support</Text>
+          <Text style={s.cardSub}>Get help with a ride, payment, or account issue</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("myLostItems")}>
-          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#5B8FE022", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-            <Ionicons name="search" size={22} color="#5B8FE0" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Lost & Found</Text>
-            <Text style={s.cardSub}>Track items you've reported leaving behind</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#5B8FE0" />
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.card, { flexDirection: "row", alignItems: "center" }]} onPress={() => go("myRefundRequests")}>
-          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: "#5B8FE022", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-            <Ionicons name="cash-outline" size={22} color="#5B8FE0" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Refund Requests</Text>
-            <Text style={s.cardSub}>Track the status of any refunds you've requested</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#5B8FE0" />
+        <TouchableOpacity style={s.card} onPress={() => Alert.alert("About Luma", "Ghana's own super app for rides, delivery, food and home services.")}>
+          <Text style={s.cardTitle}><Ionicons name="information-circle" size={18} color="#2DD4BF" /> About Luma</Text>
+          <Text style={s.cardSub}>Version 1.0.0</Text>
         </TouchableOpacity>
 
-        <Text style={s.sectionTitle}>SUPPORT</Text>
-        <TouchableOpacity style={s.card} onPress={() => go("helpSupport")}>
-          <Text style={s.cardTitle}><Ionicons name="chatbubble" size={18} color="#2DD4BF" /> Help & Support</Text>
-          <Text style={s.cardSub}>FAQs, contact options, and how things work</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.card} onPress={() => go("aboutLuma")}>
-          <Text style={s.cardTitle}><Ionicons name="information-circle" size={18} color="#2DD4BF" /> About Luma</Text>
-          <Text style={s.cardSub}>Our mission, what we offer, and version info</Text>
+        <TouchableOpacity style={[s.btnOut, { marginTop: 8 }]} onPress={logout}>
+          <Text style={s.btnOutTxt}>Log Out</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -6840,13 +6109,9 @@ export default function App() {
           <Text style={{ color: "#2DD4BF", fontSize: 12, textAlign: "center" }}><Ionicons name="cash" size={18} color="#2DD4BF" /> Payment is collected after your hire period ends — never before.</Text>
         </View>
 
-        {submittingHire ? (
-          <Pulse label="Booking your hire..." size={32} />
-        ) : (
-          <TouchableOpacity style={s.btn} onPress={submitHire}>
-            <Text style={s.btnTxt}><Ionicons name="time" size={16} color="#000" /> Confirm Hourly Hire</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={s.btn} onPress={submitHire}>
+          <Text style={s.btnTxt}><Ionicons name="time" size={16} color="#000" /> Confirm Hourly Hire</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -6859,17 +6124,15 @@ export default function App() {
         <Text style={s.navLogo}>My Bookings</Text>
         <TouchableOpacity onPress={() => go("myLostItems")}><Ionicons name="search-outline" size={22} color="#2DD4BF" /></TouchableOpacity>
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 20 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => handleRefresh(fetchClientBookings)} tintColor="#2DD4BF" colors={["#2DD4BF"]} />}>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
         {clientBookings.length === 0
           ? <EmptyState icon="map-outline" title="No trips yet" subtitle="Your rides, deliveries and orders will show up here. Book your first one — we'll get you moving." />
           : clientBookings.map((b, i) => (
             <View key={i} style={s.card}>
               <Text style={s.cardTitle}><Ionicons name={b.status === "scheduled" ? "calendar" : "car-sport"} size={15} color="#F4F6FB" /> {b.service === "tuktuk" ? "Tuk Tuk" : b.service === "motorbike" ? "Delivery" : "Car Ride"}{b.status === "scheduled" ? " (Scheduled)" : ""}</Text>
               {b.scheduled_for && (
-                <Text style={{ color: "#5B8FE0", fontWeight: "bold", fontSize: 13, marginTop: 4 }}>
-                  <Ionicons name="time" size={13} color="#5B8FE0" /> {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                <Text style={{ color: "#2196f3", fontWeight: "bold", fontSize: 13, marginTop: 4 }}>
+                  <Ionicons name="time" size={13} color="#2196f3" /> {new Date(b.scheduled_for).toLocaleDateString()} at {new Date(b.scheduled_for).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </Text>
               )}
               <Text style={{ color: "#8A9BB8", fontSize: 13, marginTop: 4 }}><Ionicons name="location" size={13} color="#8A9BB8" /> From: {b.pickup}</Text>
@@ -6877,7 +6140,7 @@ export default function App() {
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
                 <Text style={{ color: "#2DD4BF", fontWeight: "bold" }}>GHS {b.price}</Text>
                 <Text style={{ color: "#5A6B85", fontSize: 12 }}>
-                  {b.payment_method === "momo" ? "MoMo" : b.payment_method === "card" ? "Card" : "Cash"}
+                  {b.payment_method === "momo" ? "📱 MoMo" : b.payment_method === "card" ? "💳 Card" : "💵 Cash"}
                 </Text>
               </View>
               <View style={[s.badge, { backgroundColor: b.status === "pending" ? "#2a2000" : b.status === "accepted" ? "#1a3a1a" : "#1a1a2a" }]}>
@@ -6903,7 +6166,7 @@ export default function App() {
                       { text: "Cancel Ride", style: "destructive", onPress: () => cancelBooking(b.id, true) },
                     ]
                   )}>
-                  <Text style={{ color: "#F87171", fontWeight: "bold" }}>{"✕"} Cancel Booking</Text>
+                  <Text style={{ color: "#f44336", fontWeight: "bold" }}>{"✕"} Cancel Booking</Text>
                 </TouchableOpacity>
               )}
               {b.status === "completed" && !b.rated && (
@@ -6969,7 +6232,7 @@ export default function App() {
   if (screen === "myRefundRequests") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <TouchableOpacity onPress={() => go("clientSettings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
         <Text style={s.navLogo}>Refund Requests</Text>
         <View />
       </View>
@@ -6984,7 +6247,7 @@ export default function App() {
                 <View style={[s.badge, {
                   backgroundColor: r.status === "approved" ? "#1a3a1a" : r.status === "rejected" ? "#3a1a1a" : "#2a2000"
                 }]}>
-                  <Text style={{ color: r.status === "approved" ? "#2DD4BF" : r.status === "rejected" ? "#F87171" : "#f5a623", fontSize: 12 }}>
+                  <Text style={{ color: r.status === "approved" ? "#2DD4BF" : r.status === "rejected" ? "#f44336" : "#f5a623", fontSize: 12 }}>
                     {r.status === "approved" ? "✓ REFUNDED" : r.status === "rejected" ? "DECLINED" : "UNDER REVIEW"}
                   </Text>
                 </View>
@@ -7038,7 +6301,7 @@ export default function App() {
   if (screen === "myLostItems") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
-        <TouchableOpacity onPress={() => go("clientSettings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => go("clientHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
         <Text style={s.navLogo}>Lost & Found</Text>
         <View />
       </View>
@@ -7171,28 +6434,19 @@ export default function App() {
           )}
 
           <Text style={s.sectionTitle}>LIVE LOCATION</Text>
-          <Tappable onPress={() => openFullMap(activeBooking?.pickup, "Pickup Point", "client")} style={{ position: "relative" }}>
-            <WebView
-              pointerEvents="none"
-              style={{ width: "100%", height: 320, borderRadius: 12, marginBottom: 12 }}
-              source={{
-                html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
-                  var driverLat=${driverLiveLocation?.latitude || pickupPin?.latitude || location?.latitude || 6.6};
-                  var driverLng=${driverLiveLocation?.longitude || pickupPin?.longitude || location?.longitude || -0.9};
-                  var map=L.map("map",{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false}).setView([driverLat,driverLng],15);
-                  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-                  var driverIcon=L.divIcon({html:'<svg width="38" height="46" viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg"><path d="M19 0C8.5 0 0 8.5 0 19c0 13.3 19 27 19 27s19-13.7 19-27C38 8.5 29.5 0 19 0z" fill="#0B1220" stroke="#2DD4BF" stroke-width="2"/><path d="M11 22.5l1.3-4c.2-.6.8-1 1.4-1h10.6c.6 0 1.2.4 1.4 1l1.3 4v5.5c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7v-1H15v1c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7V22.5z" fill="#2DD4BF"/><circle cx="14.5" cy="25.5" r="1.3" fill="#0B1220"/><circle cx="23.5" cy="25.5" r="1.3" fill="#0B1220"/></svg>',iconSize:[38,46],iconAnchor:[19,46],className:"driver-marker"});
-                  L.marker([driverLat,driverLng],{icon:driverIcon}).addTo(map).bindPopup("Your Driver").openPopup();
-                </script></body></html>`
-              }}
-            />
-            <View style={{ position: "absolute", bottom: 12, left: 0, right: 0, alignItems: "center" }}>
-              <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#0B1220E6", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 }}>
-                <Ionicons name="navigate" size={15} color="#2DD4BF" />
-                <Text style={{ color: "#F4F6FB", fontSize: 12, fontWeight: "600", marginLeft: 6 }}>Tap to view full map</Text>
-              </View>
-            </View>
-          </Tappable>
+          <WebView
+            style={{ width: "100%", height: 260, borderRadius: 12, marginBottom: 12 }}
+            source={{
+              html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
+                var driverLat=${driverLiveLocation?.latitude || pickupPin?.latitude || location?.latitude || 6.6};
+                var driverLng=${driverLiveLocation?.longitude || pickupPin?.longitude || location?.longitude || -0.9};
+                var map=L.map("map",{attributionControl:false}).setView([driverLat,driverLng],15);
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+                var driverIcon=L.divIcon({html:'<svg width="38" height="46" viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg"><path d="M19 0C8.5 0 0 8.5 0 19c0 13.3 19 27 19 27s19-13.7 19-27C38 8.5 29.5 0 19 0z" fill="#0B1220" stroke="#2DD4BF" stroke-width="2"/><path d="M11 22.5l1.3-4c.2-.6.8-1 1.4-1h10.6c.6 0 1.2.4 1.4 1l1.3 4v5.5c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7v-1H15v1c0 .4-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7V22.5z" fill="#2DD4BF"/><circle cx="14.5" cy="25.5" r="1.3" fill="#0B1220"/><circle cx="23.5" cy="25.5" r="1.3" fill="#0B1220"/></svg>',iconSize:[38,46],iconAnchor:[19,46],className:"driver-marker"});
+                L.marker([driverLat,driverLng],{icon:driverIcon}).addTo(map).bindPopup("Your Driver").openPopup();
+              </script></body></html>`
+            }}
+          />
           {driverLiveLocation
             ? <Text style={{ color: "#2DD4BF", textAlign: "center", marginBottom: 12 }}>{"●"} Live — updating every 3 seconds</Text>
             : <Text style={{ color: "#8A9BB8", textAlign: "center", marginBottom: 12 }}>Waiting for driver location...</Text>
@@ -7205,20 +6459,12 @@ export default function App() {
               : chatMessages.map((m, i) => (
                 <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
                   <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                  {m.image_url
-                    ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                    : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                  <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>
                 </View>
               ))
             }
           </View>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-            <TouchableOpacity
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
-              disabled={uploadingChatPhoto}
-              onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
-              {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
-            </TouchableOpacity>
             <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
             <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
               <Text style={s.btnTxt}>Send</Text>
@@ -7226,7 +6472,7 @@ export default function App() {
           </View>
 
           {sosCountdown > 0 ? (
-            <View style={[s.sosBtn, { backgroundColor: "#F87171", borderColor: "#F87171" }]}>
+            <View style={[s.sosBtn, { backgroundColor: "#f44336", borderColor: "#f44336" }]}>
               <Text style={{ color: "#F4F6FB", fontWeight: "bold" }}>Sending SOS in {sosCountdown}...</Text>
               <TouchableOpacity onPress={cancelSosCountdown} style={{ marginTop: 6 }}>
                 <Text style={{ color: "#F4F6FB", textDecorationLine: "underline" }}>Cancel</Text>
@@ -7234,10 +6480,10 @@ export default function App() {
             </View>
           ) : (
             <TouchableOpacity
-              style={[s.sosBtn, sosHolding && { backgroundColor: "#F87171", borderColor: "#F87171" }]}
+              style={[s.sosBtn, sosHolding && { backgroundColor: "#f44336", borderColor: "#f44336" }]}
               onPressIn={startSosHold}
               onPressOut={cancelSosHold}>
-              <Text style={{ color: sosHolding ? "#F4F6FB" : "#F87171", fontWeight: "bold", fontSize: 13 }}>
+              <Text style={{ color: sosHolding ? "#F4F6FB" : "#f44336", fontWeight: "bold", fontSize: 13 }}>
                 {sosHolding ? "Keep holding..." : "Hold for SOS"}
               </Text>
             </TouchableOpacity>

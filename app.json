@@ -1,46 +1,23 @@
 {
   "expo": {
-    "name": "LuminaLinks",
-    "slug": "luminalinks",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "luminalinks",
-    "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
-    },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.lumina.links"
-    },
+    "name": "Luma",
+    "scheme": "luma",
+    "icon": "./assets/images/luma-app-icon-1024.png",
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/luma-adaptive-icon-android.png",
+        "backgroundColor": "#2DD4BF"
       },
-      "package": "com.lumina.links",
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
-      ]
+      "package": "com.lumia614.luma",
+      "googleServicesFile": "./google-services.json"
     },
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+    "extra": {
+      "eas": {
+        "projectId": "5a43ae93-55e6-4326-a848-d291f5b2a4ee"
+      }
     },
     "plugins": [
-      "expo-router"
-    ],
-    "experiments": {
-      "typedRoutes": true
-    }
+      "expo-font"
+    ]
   }
 }
