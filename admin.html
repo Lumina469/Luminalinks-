@@ -1080,17 +1080,17 @@
     </div>
 
     <div class="card" style="margin-top:8px;">
-      <div class="card-title">Built-in Codes (Blueprint)</div>
-      <div class="card-sub">These are hardcoded in the app and always active.</div>
+      <div class="card-title">Founder &amp; Staff Codes (Live)</div>
+      <div class="card-sub">These are editable from Settings — this shows whatever is actually saved right now, not a fixed reference. If it doesn't match what you expect, check Settings → Founder/Staff codes.</div>
       <table style="width:100%;border-collapse:collapse;">
         <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);">F0UN-D3R-LNK-X9Q2</td>
+          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);" id="live-founder-code">Loading...</td>
           <td style="padding:10px;color:var(--text-dim);">100% off — Founder only</td>
           <td style="padding:10px;"><span class="badge green">Always Active</span></td>
         </tr>
         <tr>
-          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);">LUMINA-STAFF-2026</td>
-          <td style="padding:10px;color:var(--text-dim);">50% off — Staff only</td>
+          <td style="padding:10px;font-family:var(--font-mono);color:var(--gold);" id="live-staff-code">Loading...</td>
+          <td style="padding:10px;color:var(--text-dim);" id="live-staff-discount">— % off — Staff only</td>
           <td style="padding:10px;"><span class="badge green">Always Active</span></td>
         </tr>
       </table>
@@ -1684,6 +1684,19 @@ const NIGHT_DEFAULTS = {
   night_mult_late: 2.0, night_mult_early: 1.5,
 };
 
+// Shows whatever founder/staff code is ACTUALLY active right now, on the
+// Promo Codes page — reads from the same data Settings uses, so the two
+// pages can never show different codes again. Falls back to the mobile app's
+// own hardcoded defaults only if the admin has never customized either.
+function updateLiveCodesDisplay(textMap, valueMap) {
+  const founderEl = document.getElementById('live-founder-code');
+  const staffEl = document.getElementById('live-staff-code');
+  const staffDiscountEl = document.getElementById('live-staff-discount');
+  if (founderEl) founderEl.textContent = textMap.founder_code || 'F0UN-D3R-LNK-X9Q2';
+  if (staffEl) staffEl.textContent = textMap.staff_code || 'LUMINA-STAFF-2026';
+  if (staffDiscountEl) staffDiscountEl.textContent = `${valueMap.staff_code != null ? valueMap.staff_code : 50}% off — Staff only`;
+}
+
 async function loadSystemSettings() {
   const data = await sb('system_settings?select=*');
   const rows = Array.isArray(data) ? data : [];
@@ -1700,6 +1713,7 @@ async function loadSystemSettings() {
   if (textMap.founder_code) document.getElementById('founder-code').value = textMap.founder_code;
   if (textMap.staff_code) document.getElementById('staff-code').value = textMap.staff_code;
   if (valueMap.staff_code != null) document.getElementById('staff-discount').value = valueMap.staff_code;
+  updateLiveCodesDisplay(textMap, valueMap);
 
   // Surge — use DB value if present, otherwise fall back to blueprint default
   Object.keys(SURGE_DEFAULTS).forEach(key => {
@@ -2382,6 +2396,15 @@ async function loadPromoCodes() {
   const data = await sb('promo_codes?select=*&order=created_at.desc');
   allPromos = Array.isArray(data) ? data : [];
   renderPromosTable();
+
+  // Refresh the live founder/staff code display independently — don't rely
+  // on Settings having already loaded first, since Promo Codes might be the
+  // very first page an admin visits this session.
+  const settingsData = await sb('system_settings?select=key,value,text_value');
+  const rows = Array.isArray(settingsData) ? settingsData : [];
+  const valueMap = {}, textMap = {};
+  rows.forEach(row => { valueMap[row.key] = row.value; textMap[row.key] = row.text_value; });
+  updateLiveCodesDisplay(textMap, valueMap);
 }
 
 function renderPromosTable() {
