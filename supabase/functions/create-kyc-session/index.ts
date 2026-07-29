@@ -24,9 +24,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Create the verification session with Didit. vendor_data lets us map
-    // Didit's result back to the correct driver profile when the webhook
-    // fires later — this is the ONLY link between the two systems.
     const diditRes = await fetch("https://verification.didit.me/v3/session/", {
       method: "POST",
       headers: {
@@ -40,17 +37,33 @@ Deno.serve(async (req) => {
     });
 
     const diditData = await diditRes.json();
+    // Log the FULL raw response — Didit's own docs disagree on the exact
+    // field name across different pages (session_url vs verification_url),
+    // so rather than guess again, this makes the real shape visible in the
+    // function's logs the next time this runs.
+    console.log("Didit raw response:", JSON.stringify(diditData));
+
     if (!diditRes.ok) {
-      return new Response(JSON.stringify({ error: diditData?.message || "Didit session creation failed" }), {
+      return new Response(JSON.stringify({ error: diditData?.message || diditData?.error || "Didit session creation failed", raw: diditData }), {
         status: 500,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }
 
-    // Record that a session was started, so the driver profile shows
-    // "verification in progress" even before Didit's webhook comes back —
-    // otherwise there'd be a confusing gap between tapping "Verify" and
-    // actually getting a result.
+    // Try every field name Didit's docs have used for this — url, session_url,
+    // and verification_url — so this works regardless of which one this
+    // account/API version actually returns.
+    const resolvedUrl = diditData.url || diditData.session_url || diditData.verification_url;
+
+    if (!resolvedUrl) {
+      // Genuinely couldn't find a usable URL anywhere in the response —
+      // return the raw data so it's visible without needing a log lookup.
+      return new Response(JSON.stringify({ error: "Didit didn't return a session URL", raw: diditData }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     await supabase.from("profiles").update({
       kyc_submitted: true,
@@ -58,7 +71,7 @@ Deno.serve(async (req) => {
     }).eq("id", userId);
 
     return new Response(JSON.stringify({
-      sessionUrl: diditData.session_url || diditData.verification_url,
+      sessionUrl: resolvedUrl,
       sessionId: diditData.session_id,
     }), {
       status: 200,

@@ -717,11 +717,33 @@ export default function App() {
   }, [screen]);
 
   const fetchDriverBookings = async () => {
-    const { data } = await supabase
-      .from("bookings")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (data) setDriverBookings(data);
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const serviceMap: { [key: string]: string } = { car_driver: "car", tuktuk_driver: "tuktuk", motorbike_rider: "motorbike" };
+    const myService = user?.role ? serviceMap[user.role] : undefined;
+
+    // Two scoped queries instead of one unfiltered pull of the entire table:
+    // (a) MY OWN bookings — any status — for ride history, stats, and
+    //     resuming an active ride. This alone used to be the bug: without it,
+    //     ANY driver could see EVERY booking ever made by EVERY driver and
+    //     client on the platform, including completed rides that weren't
+    //     theirs — exactly what was reported.
+    // (b) Unassigned PENDING requests matching this driver's own vehicle
+    //     type — the actual "new ride requests to consider accepting" list.
+    const ownBookingsPromise = u
+      ? supabase.from("bookings").select("*").eq("driver_id", u.id).order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] });
+    const pendingRequestsPromise = myService
+      ? supabase.from("bookings").select("*").eq("status", "pending").eq("service", myService).is("driver_id", null).order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] });
+
+    const [{ data: ownBookings }, { data: pendingRequests }] = await Promise.all([ownBookingsPromise, pendingRequestsPromise]);
+
+    // Merge and de-duplicate by id (a booking could theoretically appear in
+    // both sets in a race, e.g. this driver's own request that's somehow
+    // also unassigned — shouldn't normally happen, but de-duping is cheap insurance).
+    const merged = [...(ownBookings || []), ...(pendingRequests || [])];
+    const deduped = Array.from(new Map(merged.map(b => [b.id, b])).values());
+    setDriverBookings(deduped);
   };
 
   // Load the driver's saved online/offline availability from their profile
@@ -3509,6 +3531,26 @@ export default function App() {
   // webhook (not through this WebView directly), which updates is_verified on
   // the profile automatically. This sits ALONGSIDE the manual document upload
   // flow below, not replacing it — either path gets a driver verified.
+  // Saves vehicle info after Didit verification — no photos, no admin
+  // approval needed, since this is just operational data (what shows up on
+  // the client's tracking screen), not an identity/compliance check.
+  const submitVehicleDetails = async () => {
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (!u) { Alert.alert("Error", "Please log in again."); return; }
+    const needsExpiry = authRole === "car_driver" || authRole === "tuktuk_driver";
+    if (!vehMake || !vehColor || (needsExpiry && (!roadWorthyExpiry || !registrationExpiry))) {
+      Alert.alert("Missing details", "Please fill in all required fields.");
+      return;
+    }
+    await supabase.from("profiles").update({
+      vehicle_make: vehMake,
+      vehicle_color: vehColor,
+      vehicle_plate: vehPlate || null,
+      ...(needsExpiry ? { road_worthy_expiry: roadWorthyExpiry, registration_expiry: registrationExpiry } : {}),
+    }).eq("id", u.id);
+    go("pending");
+  };
+
   const startDiditVerification = async () => {
     if (startingDiditVerification) return;
     setStartingDiditVerification(true);
@@ -3530,11 +3572,12 @@ export default function App() {
         setDiditSessionUrl(data.sessionUrl);
         setShowDiditWebView(true);
       } else {
-        Alert.alert("Couldn't start verification", data.error || "Please try again, or use the manual upload below instead.");
+        console.log("create-kyc-session error:", data.error);
+        Alert.alert("Couldn't start verification", data.error ? `${data.error}\n\nPlease try again.` : "Please try again in a moment.");
       }
     } catch (e) {
       setStartingDiditVerification(false);
-      Alert.alert("Couldn't start verification", "Please check your connection and try again, or use the manual upload below instead.");
+      Alert.alert("Couldn't start verification", "Please check your connection and try again.");
     }
   };
 
@@ -4289,6 +4332,58 @@ export default function App() {
     );
   }
 
+  // VEHICLE DETAILS — mandatory step after Didit verification for driver
+  // roles. Identity is Didit's job; this is purely "what shows up on the
+  // client's screen" info, so it doesn't need photos or admin approval.
+  if (screen === "vehicleDetails") return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <View />
+        <Text style={s.navLogo}>Vehicle Details</Text>
+        <View />
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Text style={{ color: "#F4F6FB", fontSize: 16, fontWeight: "bold", marginBottom: 4 }}>Almost done!</Text>
+        <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 20 }}>
+          One last step — tell clients what to look for when you arrive.
+        </Text>
+        <TextInput
+          style={s.input}
+          placeholder={authRole === "car_driver" ? "Car Make/Model (e.g. Toyota Corolla)" : authRole === "tuktuk_driver" ? "Tuk Tuk Make/Brand" : "Bike Make/Brand (e.g. Honda)"}
+          placeholderTextColor="#5A6B85"
+          value={vehMake}
+          onChangeText={setVehMake}
+        />
+        <TextInput
+          style={s.input}
+          placeholder="Colour (e.g. Silver)"
+          placeholderTextColor="#5A6B85"
+          value={vehColor}
+          onChangeText={setVehColor}
+        />
+        <TextInput
+          style={s.input}
+          placeholder={authRole === "motorbike_rider" ? "Plate/Registration Number (optional)" : "Plate Number"}
+          placeholderTextColor="#5A6B85"
+          value={vehPlate}
+          onChangeText={setVehPlate}
+          autoCapitalize="characters"
+        />
+        {(authRole === "car_driver" || authRole === "tuktuk_driver") && (
+          <>
+            <Text style={{ color: "#2DD4BF", fontSize: 12, marginBottom: 6 }}>Road Worthy Certificate Expiry</Text>
+            <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#5A6B85" value={roadWorthyExpiry} onChangeText={setRoadWorthyExpiry} />
+            <Text style={{ color: "#2DD4BF", fontSize: 12, marginBottom: 6 }}>Vehicle Registration Expiry</Text>
+            <TextInput style={s.input} placeholder="YYYY-MM-DD" placeholderTextColor="#5A6B85" value={registrationExpiry} onChangeText={setRegistrationExpiry} />
+          </>
+        )}
+        <TouchableOpacity style={s.btn} onPress={submitVehicleDetails}>
+          <Text style={s.btnTxt}>Finish</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+
   // DIDIT INSTANT VERIFICATION — hosted flow in a WebView, same pattern as
   // Paystack. Completion isn't detected here (Didit reports the result via
   // webhook, not a postMessage) — closing this just sends the driver to the
@@ -4300,7 +4395,16 @@ export default function App() {
         <TouchableOpacity onPress={() => {
           setShowDiditWebView(false);
           setDiditSessionUrl(null);
-          go("pending");
+          // Vehicle info (make/color/plate) was never collected by Didit — it
+          // only verifies identity, not what the driver actually drives. This
+          // is exactly the gap that left a client-facing driver card with no
+          // vehicle details for anyone who used instant verification —
+          // routing through this step first closes it for good.
+          if (["car_driver", "tuktuk_driver", "motorbike_rider"].includes(authRole || "")) {
+            go("vehicleDetails");
+          } else {
+            go("pending");
+          }
         }}><Text style={s.navLink}>Done</Text></TouchableOpacity>
         <Text style={s.navLogo}>Identity Verification</Text>
         <View />
@@ -4705,9 +4809,9 @@ export default function App() {
         </Text>
         <Text style={{ color: "#5A6B85", fontSize: 11, marginBottom: 20 }}>Expired documents are automatically rejected.</Text>
 
-        {verifyStep === 1 && (
+        {verifyStep === 1 && ["car_driver", "tuktuk_driver", "motorbike_rider"].includes(authRole || "") && (
           <View style={[s.card, { borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 20 }]}>
-            <Text style={s.cardTitle}><Ionicons name="flash" size={16} color="#2DD4BF" /> Instant Verification (Recommended)</Text>
+            <Text style={s.cardTitle}><Ionicons name="flash" size={16} color="#2DD4BF" /> Identity Verification</Text>
             <Text style={[s.cardSub, { marginTop: 4, marginBottom: 12 }]}>
               Verify with a quick selfie and Ghana Card scan — usually done in under a minute, no waiting for manual review.
             </Text>
@@ -4718,14 +4822,11 @@ export default function App() {
                 <Text style={s.btnTxt}>Verify Instantly</Text>
               </TouchableOpacity>
             )}
-            <Text style={{ color: "#5A6B85", fontSize: 11, textAlign: "center", marginTop: 10 }}>
-              Prefer to upload documents manually instead? Continue below.
-            </Text>
           </View>
         )}
 
-        {/* ── STEP 1: GHANA CARD (all roles) ── */}
-        {verifyStep === 1 && (
+        {/* ── STEP 1: GHANA CARD (restaurant only — Didit's identity check above doesn't cover business/food-safety verification, so restaurants still go through manual review) ── */}
+        {verifyStep === 1 && authRole === "restaurant" && (
           <>
             <Text style={s.sectionTitle}>STEP 1 — GHANA CARD</Text>
             <View style={s.verifyStep}>
@@ -5732,7 +5833,7 @@ export default function App() {
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
           {[
             [ICON_TUKTUK, "Tuk Tuk", "Short trips", "tuktuk", "#F5A623", false],
-            [ICON_MOTORBIKE, "Motorbike", "Fast delivery", "motorbike", "#ff5722", false],
+            [ICON_MOTORBIKE, "Send Parcel", "Fast motorbike delivery", "motorbike", "#ff5722", false],
             [ICON_HOURLY, "Hourly Hire", "By the hour", "hire", "#5B8FE0", false],
             [ICON_FOOD, "Food Delivery", "Restaurants", "food", "#2DD4BF", false],
           ].map(([iconSrc, title, sub, type, color, soon], i) => (
@@ -6905,7 +7006,6 @@ export default function App() {
           {[
             ["car", "car-sport", "Car", 110],
             ["tuktuk", "car", "Tuk Tuk", 65],
-            ["motorbike", "bicycle", "Motorbike", 45],
           ].map(([val, icon, label, rate]) => (
             <TouchableOpacity
               key={val as string}
