@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     // that should ever see every user's push token, never the browser directly.
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    let query = supabase.from("profiles").select("push_token, role, notif_push, notif_promos");
+    let query = supabase.from("profiles").select("id, push_token, role, notif_push, notif_promos");
     if (target === "clients") {
       query = query.eq("role", "client");
     } else if (target === "drivers") {
@@ -47,9 +47,27 @@ Deno.serve(async (req) => {
       });
     }
 
-    const tokens = (data || [])
-      // Respect preferences: skip anyone who turned off push entirely or opted out of promos/broadcasts
-      .filter((p: any) => p.notif_push !== false && p.notif_promos !== false)
+    // Respect preferences: skip anyone who turned off push entirely or opted
+    // out of promos/broadcasts — applied once, used for both the in-app
+    // record and the push send below, so the two stay consistent.
+    const eligible = (data || []).filter((p: any) => p.notif_push !== false && p.notif_promos !== false);
+
+    // Write an in-app notification record for EVERY eligible user — this was
+    // the actual gap: previously this function only ever attempted a push
+    // send, so if the push failed to deliver (app closed, stale token) or the
+    // person just wasn't looking at their phone at that exact moment, the
+    // notification vanished completely with no trace in the app itself.
+    if (eligible.length > 0) {
+      const notificationRows = eligible.map((p: any) => ({ user_id: p.id, title, body }));
+      const { error: insertError } = await supabase.from("notifications").insert(notificationRows);
+      if (insertError) {
+        console.log("Failed to insert notification records:", insertError.message);
+        // Don't abort the whole send over this — still attempt the push below,
+        // but surface it in the response so it's visible something's off.
+      }
+    }
+
+    const tokens = eligible
       .map((p: any) => p.push_token)
       .filter((t: string | null) => t && t.startsWith("ExponentPushToken"));
 
@@ -66,7 +84,7 @@ Deno.serve(async (req) => {
       sent += chunk.length;
     }
 
-    return new Response(JSON.stringify({ sent, matched: tokens.length }), {
+    return new Response(JSON.stringify({ sent, matched: eligible.length, inAppRecordsCreated: eligible.length }), {
       status: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
     });

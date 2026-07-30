@@ -443,6 +443,13 @@ export default function App() {
   const [pickupPin, setPickupPin] = useState<any>(null);
   const [dropoffPin, setDropoffPin] = useState<any>(null);
   const [pickupSugg, setPickupSugg] = useState<any[]>([]);
+  const [bookingForSomeoneElse, setBookingForSomeoneElse] = useState(false);
+  const [recipientName, setRecipientName] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [bookingQuantity, setBookingQuantity] = useState(1);
+  const [submittingBulkBooking, setSubmittingBulkBooking] = useState(false);
+  const [paymentDescription, setPaymentDescription] = useState("Ride Fare");
+  const [showMoreBookingOptions, setShowMoreBookingOptions] = useState(false);
   const [dropoffSugg, setDropoffSugg] = useState<any[]>([]);
   const [searchingPlaces, setSearchingPlaces] = useState(false);
   const [activeField, setActiveField] = useState<string | null>(null);
@@ -510,6 +517,36 @@ export default function App() {
   const [selectedRating, setSelectedRating] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{ title: string; message: string; icon: string; iconColor: string; buttons: { text: string; onPress?: () => void; style?: "default" | "cancel" | "destructive" }[] } | null>(null);
+
+  // Drop-in replacement for the native showAlert(title, message, buttons) —
+  // same exact call signature, so every existing call site converts with a
+  // simple find-replace of the function name, no need to touch each one's
+  // internal logic. Auto-picks an icon/color based on keywords in the title,
+  // so a mechanical rename still looks intentional rather than generic.
+  const showAlert = (title: string, message?: string, buttons?: { text: string; onPress?: () => void; style?: "default" | "cancel" | "destructive" }[]) => {
+    const t = title.toLowerCase();
+    let icon = "information-circle";
+    let iconColor = "#5B8FE0";
+    if (/error|failed|couldn.t|missing|invalid|denied|declined|rejected|suspended|expired|limit reached|not found|already/.test(t)) {
+      icon = "alert-circle"; iconColor = "#F87171";
+    } else if (/success|sent|complete|approved|added|confirmed|paid|requested|updated|saved|delivered|verified/.test(t)) {
+      icon = "checkmark-circle"; iconColor = "#2DD4BF";
+    } else if (/warning|outstanding|required|pending/.test(t)) {
+      icon = "warning"; iconColor = "#F5A623";
+    }
+    setCustomAlert({
+      title,
+      message: message || "",
+      icon,
+      iconColor,
+      buttons: buttons && buttons.length > 0 ? buttons : [{ text: "OK" }],
+    });
+  };
+  const [showFoodHistory, setShowFoodHistory] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [savingProfileEdit, setSavingProfileEdit] = useState(false);
   const [showFoodRatingModal, setShowFoodRatingModal] = useState(false);
   const [pendingFoodRatingOrderId, setPendingFoodRatingOrderId] = useState<string | null>(null);
   const [selectedFoodRating, setSelectedFoodRating] = useState(0);
@@ -535,6 +572,10 @@ export default function App() {
   // Refs
   const ptRef = useRef<any>(null);
   const fullMapWebViewRef = useRef<any>(null);
+  const [frozenFullMapCoords, setFrozenFullMapCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [lastSeenChatMessageId, setLastSeenChatMessageId] = useState<string | null>(null);
+  const fullMapWasOpenRef = useRef(false);
   const dtRef = useRef<any>(null);
 
   // ============================================================
@@ -582,18 +623,12 @@ export default function App() {
     })();
   }, []);
 
-  // Auto-detect pickup location when client opens the booking screen
-  useEffect(() => {
-    if (screen === "bookRide" && !pickupText && location) {
-      (async () => {
-        setPickupText("Finding you on the map...");
-        const address = await reverseGeocode(location.latitude, location.longitude);
-        setPickupText(address);
-        setPickupPin({ latitude: location.latitude, longitude: location.longitude });
-        if (dropoffPin) updateFare(location.latitude, location.longitude, dropoffPin.latitude, dropoffPin.longitude);
-      })();
-    }
-  }, [screen, location]);
+  // Pickup used to auto-fill with current location the instant the booking
+  // screen opened — convenient when you ARE the one being picked up, but it
+  // actively worked against booking a pickup somewhere else entirely (a
+  // school, a relative's house) since it could overwrite what you were
+  // typing. Now it stays empty by default; "Use My Current Location" is an
+  // explicit, optional action instead of a forced default.
 
   // ============================================================
   // DATA FETCHING
@@ -769,6 +804,25 @@ export default function App() {
 
   // Toggle availability and persist it — offline drivers stop receiving new ride requests
   const toggleOnline = async (value: boolean) => {
+    if (value) {
+      // Going online requires being fully verified — identity for everyone,
+      // PLUS license approval for car drivers specifically, since Didit only
+      // ever checks identity, never driving eligibility. Queried fresh here
+      // rather than trusting cached user state, which could be stale if
+      // approval happened after this session's login.
+      const { data: { user: checkUser } } = await supabase.auth.getUser();
+      if (checkUser) {
+        const { data: freshProfile } = await supabase.from("profiles").select("is_verified, license_verified, role").eq("id", checkUser.id).maybeSingle();
+        if (!freshProfile?.is_verified) {
+          showAlert("Verification required", "You need to complete identity verification before going online.");
+          return;
+        }
+        if (freshProfile.role === "car_driver" && !freshProfile.license_verified) {
+          showAlert("License review pending", "Your driver's license is still awaiting review — you'll be notified once it's approved.");
+          return;
+        }
+      }
+    }
     setOnline(value); // update UI immediately
     const { data: { user: u } } = await supabase.auth.getUser();
     if (!u) return; // demo accounts have no real profile row; UI-only is fine for them
@@ -776,7 +830,7 @@ export default function App() {
     if (error) {
       // Roll back if the save failed
       setOnline(!value);
-      Alert.alert("Couldn't update status", "Please check your connection and try again.");
+      showAlert("Couldn't update status", "Please check your connection and try again.");
     }
   };
 
@@ -830,7 +884,7 @@ export default function App() {
   const saveHomeAddress = async (text: string, lat: number, lng: number) => {
     const { data: { user: u } } = await supabase.auth.getUser();
     if (!u) {
-      Alert.alert("Sign in required", "Please log in with a real account to save a home address.");
+      showAlert("Sign in required", "Please log in with a real account to save a home address.");
       return;
     }
     const { error } = await supabase.from("profiles").update({
@@ -838,9 +892,9 @@ export default function App() {
       home_address_lat: lat,
       home_address_lng: lng,
     }).eq("id", u.id);
-    if (error) { Alert.alert("Error", "Could not save your home address: " + error.message); return; }
+    if (error) { showAlert("Error", "Could not save your home address: " + error.message); return; }
     setHomeAddress({ text, lat, lng });
-    Alert.alert("Saved! 🏠", "Your home address will now show as a quick option when booking.");
+    showAlert("Saved! 🏠", "Your home address will now show as a quick option when booking.");
   };
 
   const removeHomeAddress = async () => {
@@ -885,16 +939,16 @@ export default function App() {
 
   const addFavouriteDriver = async (driverId: string, driverName: string) => {
     if (favouriteDrivers.length >= 5) {
-      Alert.alert("Limit Reached", "You can have a maximum of 5 favourite drivers. Remove one first to add a new one.");
+      showAlert("Limit Reached", "You can have a maximum of 5 favourite drivers. Remove one first to add a new one.");
       return;
     }
     if (favouriteDrivers.some(f => f.driver_id === driverId)) {
-      Alert.alert("Already Added", `${driverName} is already in your favourites.`);
+      showAlert("Already Added", `${driverName} is already in your favourites.`);
       return;
     }
     const { data: { user: u } } = await supabase.auth.getUser();
     if (!u) {
-      Alert.alert("Sign in required", "Favourite drivers can only be saved on a real account. Demo accounts can't add favourites.");
+      showAlert("Sign in required", "Favourite drivers can only be saved on a real account. Demo accounts can't add favourites.");
       return;
     }
     const clientId = u.id;
@@ -905,19 +959,19 @@ export default function App() {
     });
     if (!error) {
       haptic("success");
-      Alert.alert("Added! ⭐", `${driverName} is now one of your favourite drivers.`);
+      showAlert("Added! ⭐", `${driverName} is now one of your favourite drivers.`);
       fetchFavouriteDrivers();
     } else {
       // Surface the real reason instead of failing silently — this is almost
       // always a Row Level Security policy on favourite_drivers blocking the
       // insert, and showing the actual error is what makes that diagnosable.
-      Alert.alert("Couldn't add favourite", error.message);
+      showAlert("Couldn't add favourite", error.message);
     }
   };
 
   const removeFavouriteDriver = async (favId: string, driverName: string) => {
     await supabase.from("favourite_drivers").delete().eq("id", favId);
-    Alert.alert("Removed", `${driverName} removed from favourites.`);
+    showAlert("Removed", `${driverName} removed from favourites.`);
     fetchFavouriteDrivers();
   };
 
@@ -1011,11 +1065,31 @@ export default function App() {
     if (data?.driver_lat) {
       setDriverLiveLocation({ latitude: data.driver_lat, longitude: data.driver_lng });
       if (data.client_lat && data.client_lng) {
+        // Straight-line distance/speed guess as an immediate fallback — gets
+        // replaced by the real routed ETA below the moment it resolves, and
+        // stays as the answer if that request ever fails (offline moment,
+        // OSRM demo server briefly busy).
         const km = getDist(data.driver_lat, data.driver_lng, data.client_lat, data.client_lng);
-        // ~22 km/h average for city traffic in Ghana (cars/tuk tuks) — a rough
-        // estimate, not turn-by-turn routing, but far more useful than nothing.
         setDriverEtaMinutes(Math.max(1, Math.round((km / 22) * 60)));
+        fetchRealETA(data.driver_lat, data.driver_lng, data.client_lat, data.client_lng, setDriverEtaMinutes);
       }
+    }
+  };
+
+  // Real road-routing ETA via OSRM (same free service used for the map
+  // routes) — accounts for actual streets, turns, and one-ways, instead of
+  // a straight-line guess through buildings.
+  const fetchRealETA = async (fromLat: number, fromLng: number, toLat: number, toLng: number, setter: (m: number) => void) => {
+    try {
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=false`);
+      const data = await res.json();
+      const durationSeconds = data?.routes?.[0]?.duration;
+      if (durationSeconds != null) {
+        setter(Math.max(1, Math.round(durationSeconds / 60)));
+      }
+    } catch (e) {
+      // Silent — the straight-line estimate set just before this call remains
+      // on screen, which is still useful even if slightly less accurate.
     }
   };
 
@@ -1029,8 +1103,8 @@ export default function App() {
       setRiderLiveLocation({ latitude: data.rider_lat, longitude: data.rider_lng });
       if (data.delivery_lat && data.delivery_lng) {
         const km = getDist(data.rider_lat, data.rider_lng, data.delivery_lat, data.delivery_lng);
-        // ~28 km/h average — motorbikes move faster through traffic than cars
         setRiderEtaMinutes(Math.max(1, Math.round((km / 28) * 60)));
+        fetchRealETA(data.rider_lat, data.rider_lng, data.delivery_lat, data.delivery_lng, setRiderEtaMinutes);
       }
     }
   };
@@ -1089,7 +1163,7 @@ export default function App() {
   // AUTH
   // ============================================================
   const doLogin = async () => {
-    if (!authEmail || !authPass) { Alert.alert("Error", "Please enter email and password"); return; }
+    if (!authEmail || !authPass) { showAlert("Error", "Please enter email and password"); return; }
     // Demo accounts
     if (authEmail === "driver@demo.com") {
       const demoDriverId = "00000000-0000-0000-0000-000000000002";
@@ -1120,7 +1194,7 @@ export default function App() {
         go("confirmEmail");
         return;
       }
-      Alert.alert("Error", error.message);
+      showAlert("Error", error.message);
       return;
     }
     let { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user?.id).maybeSingle();
@@ -1149,7 +1223,7 @@ export default function App() {
     }
 
     if (!profile) {
-      Alert.alert("Account Issue", "We couldn't find your profile details. Please try signing up again with this email, or contact support.");
+      showAlert("Account Issue", "We couldn't find your profile details. Please try signing up again with this email, or contact support.");
       return;
     }
     const role = profile.role || profile.account_type || "client";
@@ -1165,7 +1239,7 @@ export default function App() {
     if (!isDriver) { go("clientHome"); }
     else {
       if (u.suspended) {
-        Alert.alert("Account Suspended", "Your account has been suspended. Please contact support.");
+        showAlert("Account Suspended", "Your account has been suspended. Please contact support.");
         return;
       }
       if (u.verified) { go(role === "restaurant" ? "restaurantHome" : "driverHome"); }
@@ -1175,8 +1249,8 @@ export default function App() {
   };
 
   const doSignup = async () => {
-    if (!authName || !authEmail || !authPass) { Alert.alert("Error", "Please fill all fields"); return; }
-    if (authPass !== authConfirm) { Alert.alert("Error", "Passwords do not match"); return; }
+    if (!authName || !authEmail || !authPass) { showAlert("Error", "Please fill all fields"); return; }
+    if (authPass !== authConfirm) { showAlert("Error", "Passwords do not match"); return; }
     const { data, error } = await supabase.auth.signUp({
       email: authEmail,
       password: authPass,
@@ -1189,7 +1263,7 @@ export default function App() {
         },
       },
     });
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { showAlert("Error", error.message); return; }
 
     const isDriverRole = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "home_service"].includes(authRole || "");
 
@@ -1228,7 +1302,7 @@ export default function App() {
       first_ride_done: false,
     });
     if (insertError) {
-      Alert.alert("Error", "Could not create your profile: " + insertError.message);
+      showAlert("Error", "Could not create your profile: " + insertError.message);
       return;
     }
 
@@ -1246,7 +1320,7 @@ export default function App() {
   const verifyEmailCode = async () => {
     const code = emailOtpCode.trim();
     if (!code || code.length < 6) {
-      Alert.alert("Enter Code", "Please enter the code from your email.");
+      showAlert("Enter Code", "Please enter the code from your email.");
       return;
     }
     setVerifyingCode(true);
@@ -1257,7 +1331,7 @@ export default function App() {
     });
     if (error) {
       setVerifyingCode(false);
-      Alert.alert("Invalid Code", error.message);
+      showAlert("Invalid Code", error.message);
       return;
     }
     setEmailOtpCode("");
@@ -1303,7 +1377,7 @@ export default function App() {
 
       if (insertError) {
         setVerifyingCode(false);
-        Alert.alert("Error", "Could not create your profile: " + insertError.message);
+        showAlert("Error", "Could not create your profile: " + insertError.message);
         return;
       }
       profile = newProfile;
@@ -1311,7 +1385,7 @@ export default function App() {
 
     if (!profile) {
       setVerifyingCode(false);
-      Alert.alert("Almost there", "Email confirmed! Please log in to continue.");
+      showAlert("Almost there", "Email confirmed! Please log in to continue.");
       setAuthMode("login"); go("auth");
       return;
     }
@@ -1327,7 +1401,7 @@ export default function App() {
     const isDriver = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(role);
     if (!isDriver) { go("clientHome"); }
     else {
-      if (u.suspended) { Alert.alert("Account Suspended", "Your account has been suspended. Please contact support."); return; }
+      if (u.suspended) { showAlert("Account Suspended", "Your account has been suspended. Please contact support."); return; }
       if (u.verified) { go(role === "restaurant" ? "restaurantHome" : "driverHome"); }
       else if (profile.kyc_submitted) { go("pending"); }
       else { setAuthRole(role); setVerifyStep(1); go("verify"); }
@@ -1402,9 +1476,9 @@ export default function App() {
   // Payment AFTER hire period ends — never before
   // ============================================================
   const getHireRate = (vehicle: string) => {
-    if (vehicle === "tuktuk") return 65;
-    if (vehicle === "motorbike") return 45;
-    return 110;
+    if (vehicle === "tuktuk") return 115;
+    if (vehicle === "motorbike") return 80;
+    return 180;
   };
 
   const [submittingHire, setSubmittingHire] = useState(false);
@@ -1412,7 +1486,7 @@ export default function App() {
     if (submittingHire) return;
     setSubmittingHire(true);
     try {
-    if (!hirePickup) { Alert.alert("Missing", "Please enter your pickup location"); return; }
+    if (!hirePickup) { showAlert("Missing", "Please enter your pickup location"); return; }
 
     // Same enforcement as regular ride booking — block until any unpaid
     // cancellation fee is cleared.
@@ -1427,7 +1501,7 @@ export default function App() {
       .neq("payment_status", "paid");
     if (unpaidFees && unpaidFees.length > 0) {
       const totalOwed = unpaidFees.reduce((sum: number, b: any) => sum + (b.cancellation_charge || 0), 0);
-      Alert.alert(
+      showAlert(
         "Outstanding Fee",
         `You have GHS ${totalOwed.toFixed(2)} in unpaid cancellation fees. Please clear this before booking hourly hire.`,
         [
@@ -1441,7 +1515,7 @@ export default function App() {
     const rate = getHireRate(hireVehicle);
     const total = rate * hireHours;
     const vehicleLabel = hireVehicle === "tuktuk" ? "Tuk Tuk" : hireVehicle === "motorbike" ? "Motorbike" : "Car";
-    Alert.alert(
+    showAlert(
       "Confirm Hourly Hire",
       `${vehicleLabel} for ${hireHours} hour${hireHours > 1 ? "s" : ""}\nRate: GHS ${rate}/hour\nTotal: GHS ${total}\n\nPayment is made AFTER the hire period ends — never before.`,
       [
@@ -1462,7 +1536,7 @@ export default function App() {
           }).select().single();
           if (data) {
             notifyOnlineDrivers(hirePickup, hireVehicle, total);
-            Alert.alert("Hire Booked! 🚗", `Your ${vehicleLabel} hire for ${hireHours} hour${hireHours > 1 ? "s" : ""} is confirmed. A driver will be assigned shortly.`, [{ text: "OK", onPress: () => go("myBookings") }]);
+            showAlert("Hire Booked! 🚗", `Your ${vehicleLabel} hire for ${hireHours} hour${hireHours > 1 ? "s" : ""} is confirmed. A driver will be assigned shortly.`, [{ text: "OK", onPress: () => go("myBookings") }]);
             setHirePickup(""); setHireHours(1); setHireVehicle("car");
             fetchClientBookings();
           }
@@ -1476,7 +1550,7 @@ export default function App() {
 
   const addStop = () => {
     if (extraStops.length >= 2) {
-      Alert.alert("Maximum Stops", "You can add up to 3 stops total (dropoff + 2 extra stops).");
+      showAlert("Maximum Stops", "You can add up to 3 stops total (dropoff + 2 extra stops).");
       return;
     }
     setExtraStops(prev => [...prev, { text: "", pin: null, suggestions: [] }]);
@@ -1553,7 +1627,35 @@ export default function App() {
       scheduled_for: scheduledFor,
       payment_method: paymentMethodForBooking,
       payment_status: paymentMethodForBooking === "cash" ? "n/a" : "awaiting_completion",
+      // Actually saving these now — they were previously only ever READ
+      // (for the driver-en-route ETA), never written, meaning the ETA check
+      // always silently found nothing and never ran at all, regardless of
+      // how good the ETA calculation itself was.
+      client_lat: pickupPin?.latitude ?? null,
+      client_lng: pickupPin?.longitude ?? null,
+      // Booking-for-someone-else: the driver needs to know who they're
+      // actually picking up, since it may not be whoever paid for the ride.
+      recipient_name: bookingForSomeoneElse ? recipientName.trim() || null : null,
+      recipient_phone: bookingForSomeoneElse ? recipientPhone.trim() || null : null,
     }).select().single();
+
+    // Best-effort "share" — if the recipient's number happens to already
+    // belong to a registered Luma client, let them know a ride is coming for
+    // them. No SMS gateway exists yet, so this only reaches people who
+    // already have the app; that's a real limitation worth knowing, not a
+    // silent gap — there's no way yet to notify someone who isn't a user.
+    if (bookingForSomeoneElse && recipientPhone.trim() && data) {
+      const { data: recipientProfile } = await supabase.from("profiles").select("id, push_token").eq("phone", recipientPhone.trim()).maybeSingle();
+      if (recipientProfile?.push_token) {
+        sendPushNotification(
+          recipientProfile.push_token,
+          "A ride has been booked for you! 🚗",
+          `${authName || user?.name || "Someone"} booked a ${service === "tuktuk" ? "Tuk Tuk" : service === "motorbike" ? "Motorbike" : "Car"} to pick you up from ${pickup.split(",")[0]}.`,
+          recipientProfile.id
+        );
+      }
+    }
+
     return data;
   };
 
@@ -1593,7 +1695,7 @@ export default function App() {
       // Couldn't confidently re-pin one or both ends — don't guess at a fare.
       // The client will see the normal "search/select address" flow and get
       // an accurate fare once they confirm pickup and dropoff themselves.
-      Alert.alert("Please confirm your route", "We couldn't automatically re-locate one of your previous stops — please confirm pickup and dropoff to get an accurate fare.");
+      showAlert("Please confirm your route", "We couldn't automatically re-locate one of your previous stops — please confirm pickup and dropoff to get an accurate fare.");
     }
   };
 
@@ -1602,9 +1704,9 @@ export default function App() {
     if (submittingRide) return;
     setSubmittingRide(true);
     try {
-    if (!pickupText || !dropoffText) { Alert.alert("Missing", "Please enter pickup and dropoff"); return; }
+    if (!pickupText || !dropoffText) { showAlert("Missing", "Please enter pickup and dropoff"); return; }
     if (scheduleRide && (!scheduledDay || !scheduledTime)) {
-      Alert.alert("Missing", "Please select a day and time for your scheduled ride.");
+      showAlert("Missing", "Please select a day and time for your scheduled ride.");
       return;
     }
 
@@ -1622,7 +1724,7 @@ export default function App() {
       .neq("payment_status", "paid");
     if (unpaidFees && unpaidFees.length > 0) {
       const totalOwed = unpaidFees.reduce((sum: number, b: any) => sum + (b.cancellation_charge || 0), 0);
-      Alert.alert(
+      showAlert(
         "Outstanding Fee",
         `You have GHS ${totalOwed.toFixed(2)} in unpaid cancellation fees. Please clear this before booking a new ride.`,
         [
@@ -1641,7 +1743,7 @@ export default function App() {
     const scheduleNote = scheduleRide
       ? `\nScheduled: ${getNext7Days().find(d => d.key === scheduledDay)?.label} at ${getTimeSlots(scheduledDay!).find(t => t.key === scheduledTime)?.label}`
       : "";
-    Alert.alert(
+    showAlert(
       scheduleRide ? "Confirm Scheduled Ride" : "Confirm Booking",
       `Fare: GHS ${finalFare}${promoApplied && finalFare !== originalFare ? ` (was GHS ${originalFare})` : ""}\nPayment: ${methodLabel}${promoNote}${scheduleNote}\n\n${timingNote}`,
       [
@@ -1676,7 +1778,7 @@ export default function App() {
           if (pendingPaymentBookingId) {
             const { error: markPaidError } = await supabase.from("bookings").update({ payment_status: "paid" }).eq("id", pendingPaymentBookingId);
             if (markPaidError) {
-              Alert.alert(
+              showAlert(
                 "Payment received, but...",
                 "Your payment went through, but we couldn't update your booking record (" + markPaidError.message + "). Please screenshot this and let support know — your money is safe."
               );
@@ -1684,16 +1786,16 @@ export default function App() {
           }
           const channelLabel = data.channel === "mobile_money" ? "Mobile Money" : "Card";
           if (data.type === "cancellation_fee") {
-            Alert.alert("Fee Paid", `GHS ${data.amount} cancellation fee paid via ${channelLabel} — sent directly to your driver.`);
+            showAlert("Fee Paid", `GHS ${data.amount} cancellation fee paid via ${channelLabel} — sent directly to your driver.`);
             if (pendingPaymentBookingId) {
               const { data: cancelledBooking } = await supabase.from("bookings").select("driver_id").eq("id", pendingPaymentBookingId).maybeSingle();
               if (cancelledBooking?.driver_id) await notifyPaymentReceived(cancelledBooking.driver_id, data.amount, "a cancellation fee");
             }
           } else {
-            Alert.alert("Payment Successful!", `GHS ${data.amount} received via ${channelLabel}`);
+            showAlert("Payment Successful!", `GHS ${data.amount} received via ${channelLabel}`);
           }
         } else {
-          Alert.alert("Payment Failed", "We could not verify your payment. You can retry from My Bookings.");
+          showAlert("Payment Failed", "We could not verify your payment. You can retry from My Bookings.");
         }
         setPendingPaymentBookingId(null);
         fetchClientBookings();
@@ -1707,12 +1809,13 @@ export default function App() {
   // Called when a booking the client made transitions to "completed" and still needs MoMo/Card payment
   const triggerPaymentForBooking = (booking: any) => {
     if (!authEmail) {
-      Alert.alert("Email Needed", "Please make sure you're logged in with a valid email to pay online.");
+      showAlert("Email Needed", "Please make sure you're logged in with a valid email to pay online.");
       return;
     }
     setPendingPaymentBookingId(booking.id);
     setEstFare(booking.price);
     setPaymentMethod(booking.payment_method === "cash" ? "card" : booking.payment_method);
+    setPaymentDescription(`${booking.service === "tuktuk" ? "Tuk Tuk" : booking.service === "motorbike" ? "Motorbike" : "Car"} Ride Fare`);
     setShowPaystack(true);
   };
 
@@ -1721,24 +1824,81 @@ export default function App() {
   // booking was cash (since there's no MoMo/card on file for a cash payer otherwise).
   const triggerCancellationFeePayment = (booking: any) => {
     if (!authEmail) {
-      Alert.alert("Email Needed", "Please make sure you're logged in with a valid email to pay online.");
+      showAlert("Email Needed", "Please make sure you're logged in with a valid email to pay online.");
       return;
     }
     setPendingPaymentBookingId(booking.id);
     setEstFare(booking.cancellation_charge);
     setPaymentMethod(booking.payment_method === "cash" ? "card" : (booking.payment_method || "card"));
+    setPaymentDescription("Cancellation Fee");
     setShowPaystack(true);
+  };
+
+  // Creates several separate ride bookings at once — same pickup/dropoff,
+  // each one an independent booking dispatched to its own driver, for groups
+  // who need more than one car. No promo/credit applied (see note in
+  // processBooking above the bulk-check).
+  const processBulkBooking = async (fare: number) => {
+    setSubmittingBulkBooking(true);
+    const createdIds: string[] = [];
+    for (let i = 0; i < bookingQuantity; i++) {
+      const booking = await saveBookingToSupabase(pickupText, dropoffText, selectedService, fare, paymentMethod, fare, null);
+      if (booking) {
+        createdIds.push(booking.id);
+        const nb = {
+          id: booking.id,
+          service: selectedService,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          status: "pending",
+          payment_status: paymentMethod === "cash" ? "n/a" : "awaiting_completion",
+          price: fare,
+          original_price: fare,
+          promo_type: null,
+          pickup: pickupText,
+          dropoff: dropoffText,
+          payment_method: paymentMethod,
+          km: estKm,
+          promo_code: null,
+        };
+        setClientBookings(prev => [nb, ...prev]);
+        if (!(scheduleRide && scheduledDay && scheduledTime)) {
+          notifyOnlineDrivers(pickupText, selectedService, fare, booking.id);
+        }
+      }
+    }
+    setSubmittingBulkBooking(false);
+    const serviceLabel = selectedService === "tuktuk" ? "Tuk Tuk" : selectedService === "motorbike" ? "Motorbike" : "Car";
+    setBookingQuantity(1);
+    setBookingForSomeoneElse(false);
+    setRecipientName("");
+    setRecipientPhone("");
+    haptic("success");
+    showAlert(
+      "Rides Booked! 🚗",
+      `${createdIds.length} separate ${serviceLabel} ${createdIds.length === 1 ? "ride has" : "rides have"} been requested — drivers are being assigned to each one individually. Total: GHS ${(fare * createdIds.length).toFixed(2)}.`,
+      [{ text: "OK", onPress: () => go("myBookings") }]
+    );
   };
 
   const processBooking = async (finalFare?: number, originalFareParam?: number) => {
     const fare = finalFare !== undefined ? finalFare : (estFare || 20);
     const trueOriginalFare = originalFareParam !== undefined ? originalFareParam : fare;
 
+    // Bulk bookings (multiple separate rides at once) intentionally skip
+    // promo/credit/welcome-discount logic entirely — stacking a one-time
+    // discount across several simultaneous bookings would be an easy exploit,
+    // and the interaction between "apply once" and "apply per-ride" isn't
+    // worth the complexity for what's fundamentally a convenience feature.
+    if (bookingQuantity > 1) {
+      await processBulkBooking(trueOriginalFare);
+      return;
+    }
+
     // Auto-apply promo credit if client has any (expires after 7 days — simplified: deduct immediately)
     if (!promoApplied && promoCredit > 0) {
       const creditToUse = Math.min(promoCredit, fare);
       const fareAfterCredit = parseFloat((fare - creditToUse).toFixed(2));
-      Alert.alert(
+      showAlert(
         "💰 Promo Credit Applied!",
         `GHS ${creditToUse} credit used. Fare reduced from GHS ${fare} to GHS ${fareAfterCredit}.`,
         [{ text: "Great!", onPress: async () => {
@@ -1759,7 +1919,7 @@ export default function App() {
       const eligible = await checkAndApplyWelcomeDiscount();
       if (eligible) {
         const welcomeFare = parseFloat((fare * 0.75).toFixed(2));
-        Alert.alert(
+        showAlert(
           "🎉 Welcome Discount!",
           `25% off your first ride! Fare reduced from GHS ${fare} to GHS ${welcomeFare}.`,
           [{ text: "Great!", onPress: async () => {
@@ -1817,10 +1977,11 @@ export default function App() {
     const successMsg = isScheduled
       ? `Your ride is scheduled for ${getNext7Days().find(d => d.key === scheduledDay)?.label} at ${getTimeSlots(scheduledDay!).find(t => t.key === scheduledTime)?.label}. Fare: ${fareLabel}`
       : `Driver is being assigned. Fare: ${fareLabel}`;
-    Alert.alert(successTitle, successMsg, [{ text: "OK", onPress: () => go("myBookings") }]);
+    showAlert(successTitle, successMsg, [{ text: "OK", onPress: () => go("myBookings") }]);
     setPickupText(""); setDropoffText(""); setPickupPin(null); setDropoffPin(null);
     setEstFare(null); setEstKm(null); setPromoCode(""); setPromoApplied(null); setPromoError("");
     setScheduleRide(false); setScheduledDay(null); setScheduledTime(null); setExtraStops([]);
+    setBookingForSomeoneElse(false); setRecipientName(""); setRecipientPhone("");
   };
 
 
@@ -1901,7 +2062,7 @@ export default function App() {
 
   const openFullMap = async (addressText: string | null | undefined, label: string, mode: "driver" | "client") => {
     if (!addressText) {
-      Alert.alert("No location yet", "This location isn't available yet.");
+      showAlert("No location yet", "This location isn't available yet.");
       return;
     }
     setLoadingFullMap(true);
@@ -1954,6 +2115,7 @@ export default function App() {
     setActiveBookingId(ride.id);
     setBookingAcceptedAt(ride.accepted_at ? new Date(ride.accepted_at) : new Date());
     setTripStarted(false);
+    setChatOpen(false);
     fetchMessages(ride.id);
     watchDriverLocation(ride.id);
     go("activeRide");
@@ -1966,6 +2128,38 @@ export default function App() {
   useEffect(() => { seenRideAlertIdsRef.current = seenRideAlertIds; }, [seenRideAlertIds]);
   const incomingRideAlertRef = useRef<any>(null);
   useEffect(() => { incomingRideAlertRef.current = incomingRideAlert; }, [incomingRideAlert]);
+
+  // Freezes the full-map WebView's starting position the moment it opens, so
+  // the HTML/source only gets built ONCE — without this, every 3-second
+  // location update would rebuild the html string and hand it to the WebView
+  // as a "new" source, causing the whole page (and map) to visibly reload
+  // every few seconds instead of just moving smoothly.
+  useEffect(() => {
+    if (fullMapView && !fullMapWasOpenRef.current) {
+      fullMapWasOpenRef.current = true;
+      const coord = fullMapView.mode === "driver" ? (liveSelfLocation || location) : (driverLiveLocation || pickupPin || location);
+      setFrozenFullMapCoords({
+        lat: coord?.latitude ?? fullMapView.lat ?? 6.6,
+        lng: coord?.longitude ?? fullMapView.lng ?? -0.9,
+      });
+    } else if (!fullMapView && fullMapWasOpenRef.current) {
+      fullMapWasOpenRef.current = false;
+      setFrozenFullMapCoords(null);
+    }
+  }, [fullMapView]);
+
+  // Moves the live marker smoothly via injectJavaScript on every location
+  // update, instead of ever touching the WebView's source again after the
+  // initial load above.
+  useEffect(() => {
+    if (!fullMapView) return;
+    const coord = fullMapView.mode === "driver" ? (liveSelfLocation || location) : (driverLiveLocation || pickupPin || location);
+    if (coord?.latitude != null && coord?.longitude != null) {
+      fullMapWebViewRef.current?.injectJavaScript(
+        `window.lumaUpdateLive && window.lumaUpdateLive(${coord.latitude}, ${coord.longitude}); true;`
+      );
+    }
+  }, [liveSelfLocation?.latitude, liveSelfLocation?.longitude, driverLiveLocation?.latitude, driverLiveLocation?.longitude, location?.latitude, location?.longitude, fullMapView]);
 
   const checkForIncomingRideAlert = async () => {
     if (!online || !user?.role) return;
@@ -2026,17 +2220,18 @@ export default function App() {
         setRideArrivedAtDelivery(false);
         setRideDeliveryProofPhoto(null);
         setTripStarted(false);
+        setChatOpen(false);
         fetchMessages(bookingId);
         watchDriverLocation(bookingId);
         go("activeRide");
-        Alert.alert("Accepted!", "You have accepted this ride.");
+        showAlert("Accepted!", "You have accepted this ride.");
       } else {
         // Already mid-ride — claim it without interrupting the current one.
         // It'll show up in the queue on Driver Home once this ride is done.
-        Alert.alert("Ride Accepted! 🎉", "It's now in your queue — finish your current ride, then find it from Driver Home.");
+        showAlert("Ride Accepted! 🎉", "It's now in your queue — finish your current ride, then find it from Driver Home.");
       }
     } else {
-      Alert.alert("Error", error.message);
+      showAlert("Error", error.message);
     }
   };
 
@@ -2047,7 +2242,7 @@ export default function App() {
     // Motorbike Delivery is a parcel/errand service, not passenger transport —
     // require photo proof before completing, same anti-scam reasoning as food delivery.
     if (order?.service === "motorbike" && !rideDeliveryProofPhoto) {
-      Alert.alert("Photo required", "Please take a photo as delivery proof before completing this delivery.");
+      showAlert("Photo required", "Please take a photo as delivery proof before completing this delivery.");
       return;
     }
 
@@ -2163,11 +2358,13 @@ export default function App() {
     const cashMessage = cashCreditedExtra > 0
       ? `This ride used a platform-covered promo code — you collected less cash than your normal earnings, so GHS ${cashCreditedExtra.toFixed(2)} has been credited to your wallet to make up the difference.`
       : `Since this was a cash ride, GHS ${cashCommissionOwed.toFixed(2)} (our 15% commission) has been deducted from your wallet — you already collected the full fare in person.`;
-    Alert.alert(
-      "Ride Complete!",
-      isCashRide ? cashMessage : "If the client chose MoMo or Card, they'll be prompted to pay now.",
-      [{ text: "OK", onPress: () => go("driverHome") }]
-    );
+    setCustomAlert({
+      title: "Ride Complete!",
+      message: isCashRide ? cashMessage : "If the client chose MoMo or Card, they'll be prompted to pay now — it'll land in your wallet automatically once they do.",
+      icon: "checkmark-circle",
+      iconColor: "#2DD4BF",
+      buttons: [{ text: "OK", onPress: () => go("driverHome") }],
+    });
     setActiveBookingId(null);
     fetchDriverBookings();
   };
@@ -2266,7 +2463,7 @@ export default function App() {
           cancellation_reason: "Client no-show — auto cancelled after 15 minutes",
           payment_status: "pending",
         }).eq("id", bookingId);
-        Alert.alert("Auto Cancelled", "Client did not show up. A GHS 10 fee has been applied — it'll reach your wallet once the client's payment is confirmed.");
+        showAlert("Auto Cancelled", "Client did not show up. A GHS 10 fee has been applied — it'll reach your wallet once the client's payment is confirmed.");
         go("driverHome");
       } else if (elapsedMinutes > 5) {
         // GHS 1/min after 5 free minutes
@@ -2403,15 +2600,15 @@ export default function App() {
     if (byClient && charge > 0) {
       // Charge the client for real via Paystack — cash-selected bookings default to
       // card, since there's no card/MoMo on file for a cash payer otherwise.
-      Alert.alert(
+      showAlert(
         "Cancellation Fee",
         `A cancellation fee of GHS ${charge} applies. You'll be asked to pay it now — this goes directly to your driver.`,
         [{ text: "Pay Now", onPress: () => triggerCancellationFeePayment({ ...booking, cancellation_charge: charge, payment_method: booking.payment_method === "cash" ? "card" : booking.payment_method }) }]
       );
     } else if (byClient) {
-      Alert.alert("Booking Cancelled", "No charge applied.", [{ text: "OK", onPress: () => go("clientHome") }]);
+      showAlert("Booking Cancelled", "No charge applied.", [{ text: "OK", onPress: () => go("clientHome") }]);
     } else {
-      Alert.alert("Booking Cancelled", "No charge applied.", [{ text: "OK", onPress: () => go("driverHome") }]);
+      showAlert("Booking Cancelled", "No charge applied.", [{ text: "OK", onPress: () => go("driverHome") }]);
     }
   };
 
@@ -2421,7 +2618,7 @@ export default function App() {
   // ============================================================
   const withdrawEarnings = async () => {
     if (!driverWallet || driverWallet.balance < 10) {
-      Alert.alert("Minimum Not Met", "You need at least GHS 10 in your wallet to withdraw.");
+      showAlert("Minimum Not Met", "You need at least GHS 10 in your wallet to withdraw.");
       return;
     }
     const { data: { user: u } } = await supabase.auth.getUser();
@@ -2440,8 +2637,8 @@ export default function App() {
 
   const processWithdrawal = async () => {
     if (!driverWallet) return;
-    if (!withdrawMomoProvider) { Alert.alert("Select Network", "Please select your Mobile Money network."); return; }
-    if (!withdrawMomoNumber.trim()) { Alert.alert("Missing Number", "Please enter your Mobile Money number."); return; }
+    if (!withdrawMomoProvider) { showAlert("Select Network", "Please select your Mobile Money network."); return; }
+    if (!withdrawMomoNumber.trim()) { showAlert("Missing Number", "Please enter your Mobile Money number."); return; }
 
     const amount = Math.min(driverWallet.balance, 2000); // GHS 2,000 daily limit
     setProcessingWithdrawal(true);
@@ -2463,15 +2660,15 @@ export default function App() {
       setShowWithdrawModal(false);
 
       if (data.success) {
-        Alert.alert("Withdrawal Sent!", `GHS ${data.amount} is on its way to your Mobile Money.`);
+        showAlert("Withdrawal Sent!", `GHS ${data.amount} is on its way to your Mobile Money.`);
         fetchWallet();
       } else {
-        Alert.alert("Withdrawal Failed", data.message || "Something went wrong. Your balance has not been affected.");
+        showAlert("Withdrawal Failed", data.message || "Something went wrong. Your balance has not been affected.");
       }
     } catch (e: any) {
       setProcessingWithdrawal(false);
       setShowWithdrawModal(false);
-      Alert.alert("Withdrawal Failed", "Could not reach the payment service. Please try again — your balance has not been affected.");
+      showAlert("Withdrawal Failed", "Could not reach the payment service. Please try again — your balance has not been affected.");
     }
   };
 
@@ -2524,19 +2721,19 @@ export default function App() {
       .eq("sender_id", senderId)
       .not("image_url", "is", null);
     if ((count || 0) >= CHAT_PHOTO_LIMIT) {
-      Alert.alert("Photo limit reached", `You can send up to ${CHAT_PHOTO_LIMIT} photos per ride in chat.`);
+      showAlert("Photo limit reached", `You can send up to ${CHAT_PHOTO_LIMIT} photos per ride in chat.`);
       return;
     }
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to send a photo in chat."); return; }
+    if (status !== "granted") { showAlert("Permission needed", "Please allow photo access to send a photo in chat."); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.5, allowsEditing: true });
     if (r.canceled) return;
 
     setUploadingChatPhoto(true);
     const photoUrl = await uploadImageToStorage(r.assets[0].uri, "chat-photos", `${bookingId}/${senderId}/${Date.now()}.jpg`);
     setUploadingChatPhoto(false);
-    if (!photoUrl) { Alert.alert("Upload failed", "Could not send the photo. Please try again."); return; }
+    if (!photoUrl) { showAlert("Upload failed", "Could not send the photo. Please try again."); return; }
 
     await supabase.from("messages").insert({
       booking_id: bookingId,
@@ -2658,15 +2855,15 @@ export default function App() {
 
   const addEmergencyContact = async () => {
     if (!newContactName.trim() || !newContactPhone.trim()) {
-      Alert.alert("Missing details", "Please enter both a name and phone number.");
+      showAlert("Missing details", "Please enter both a name and phone number.");
       return;
     }
     if (emergencyContacts.length >= 3) {
-      Alert.alert("Limit reached", "You can save up to 3 emergency contacts.");
+      showAlert("Limit reached", "You can save up to 3 emergency contacts.");
       return;
     }
     const { data: { user: u } } = await supabase.auth.getUser();
-    if (!u) { Alert.alert("Sign in required", "Please log in with a real account to save contacts."); return; }
+    if (!u) { showAlert("Sign in required", "Please log in with a real account to save contacts."); return; }
     const { error } = await supabase.from("emergency_contacts").insert({
       user_id: u.id,
       name: newContactName.trim(),
@@ -2676,7 +2873,7 @@ export default function App() {
       setNewContactName(""); setNewContactPhone("");
       fetchEmergencyContacts();
     } else {
-      Alert.alert("Error", error.message);
+      showAlert("Error", error.message);
     }
   };
 
@@ -2706,29 +2903,29 @@ export default function App() {
     const { error } = await supabase.from("restaurants").update({ is_open: value }).eq("id", myRestaurant.id);
     if (error) {
       setMyRestaurant((prev: any) => ({ ...prev, is_open: !value }));
-      Alert.alert("Couldn't update status", "Please check your connection and try again.");
+      showAlert("Couldn't update status", "Please check your connection and try again.");
     }
   };
 
   const pickMenuItemPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to add a dish photo."); return; }
+    if (status !== "granted") { showAlert("Permission needed", "Please allow photo access to add a dish photo."); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3] });
     if (!r.canceled) setNewItemPhoto(r.assets[0].uri);
   };
 
   const addMenuItem = async () => {
-    if (!myRestaurant) { Alert.alert("Error", "Restaurant profile not found. Please contact support."); return; }
-    if (!newItemName.trim() || !newItemPrice.trim()) { Alert.alert("Missing details", "Please enter a name and price."); return; }
+    if (!myRestaurant) { showAlert("Error", "Restaurant profile not found. Please contact support."); return; }
+    if (!newItemName.trim() || !newItemPrice.trim()) { showAlert("Missing details", "Please enter a name and price."); return; }
     const price = parseFloat(newItemPrice);
-    if (isNaN(price) || price <= 0) { Alert.alert("Invalid price", "Please enter a valid price."); return; }
-    if (!newItemPhoto) { Alert.alert("Photo required", "Please add a photo of this dish — it helps clients decide what to order."); return; }
+    if (isNaN(price) || price <= 0) { showAlert("Invalid price", "Please enter a valid price."); return; }
+    if (!newItemPhoto) { showAlert("Photo required", "Please add a photo of this dish — it helps clients decide what to order."); return; }
 
     setUploadingMenuItem(true);
     const photoUrl = await uploadImageToStorage(newItemPhoto, "menu-photos", `${myRestaurant.id}/${Date.now()}.jpg`);
     if (!photoUrl) {
       setUploadingMenuItem(false);
-      Alert.alert("Upload failed", "Could not upload the photo. Please try again.");
+      showAlert("Upload failed", "Could not upload the photo. Please try again.");
       return;
     }
     const { error } = await supabase.from("menu_items").insert({
@@ -2741,10 +2938,10 @@ export default function App() {
       is_available: true,
     });
     setUploadingMenuItem(false);
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { showAlert("Error", error.message); return; }
     setNewItemName(""); setNewItemDesc(""); setNewItemPrice(""); setNewItemCategory(""); setNewItemPhoto(null);
     fetchMenuItems(myRestaurant.id);
-    Alert.alert("Added!", `${newItemName} is now on your menu.`);
+    showAlert("Added!", `${newItemName} is now on your menu.`);
   };
 
   const toggleMenuItemAvailable = async (item: any) => {
@@ -2753,7 +2950,7 @@ export default function App() {
   };
 
   const deleteMenuItem = async (item: any) => {
-    Alert.alert("Remove dish?", `Remove "${item.name}" from your menu?`, [
+    showAlert("Remove dish?", `Remove "${item.name}" from your menu?`, [
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: async () => {
         await supabase.from("menu_items").delete().eq("id", item.id);
@@ -2841,7 +3038,7 @@ export default function App() {
       status: "pending",
     }).select().single();
 
-    if (error || !order) { Alert.alert("Error", error?.message || "Could not place order."); return; }
+    if (error || !order) { showAlert("Error", error?.message || "Could not place order."); return; }
 
     const itemRows = foodCart.map(c => ({
       order_id: order.id,
@@ -2886,20 +3083,24 @@ export default function App() {
           const { data: order } = await supabase.from("food_orders").select("*").eq("id", foodPaymentOrderId).maybeSingle();
           if (order) await notifyRestaurantOfNewOrder(order, data.amount);
           setFoodCart([]);
-          Alert.alert("Payment Successful! 🍔", "Your order has been sent to the restaurant.", [
-            { text: "OK", onPress: () => { setActiveFoodOrderId(foodPaymentOrderId); go("foodOrderTracking"); } },
-          ]);
+          setCustomAlert({
+            title: "Payment Successful! 🍔",
+            message: "Your order has been sent to the restaurant.",
+            icon: "fast-food",
+            iconColor: "#2DD4BF",
+            buttons: [{ text: "OK", onPress: () => { setActiveFoodOrderId(foodPaymentOrderId); go("foodOrderTracking"); } }],
+          });
         } else {
-          Alert.alert("Payment Failed", "Your order was saved but not sent — the restaurant won't see it until payment succeeds. You can retry from My Food Orders.");
+          showAlert("Payment Failed", "Your order was saved but not sent — the restaurant won't see it until payment succeeds. You can retry from My Food Orders.");
           go("myFoodOrders");
         }
       } else {
-        Alert.alert("Payment Cancelled", "Your order was saved but not sent to the restaurant. You can retry payment from My Food Orders.");
+        showAlert("Payment Cancelled", "Your order was saved but not sent to the restaurant. You can retry payment from My Food Orders.");
         go("myFoodOrders");
       }
     } catch (e) {
       setShowFoodPaystack(false);
-      Alert.alert("Payment Failed", "Something went wrong verifying your payment.");
+      showAlert("Payment Failed", "Something went wrong verifying your payment.");
       go("myFoodOrders");
     }
     setFoodPaymentOrderId(null);
@@ -2919,21 +3120,21 @@ export default function App() {
         const data = await res.json();
         if (data.verified) {
           haptic("success");
-          Alert.alert("Payment Successful! 🎉", "Thanks — your rider has been paid for the delivery.");
+          showAlert("Payment Successful! 🎉", "Thanks — your rider has been paid for the delivery.");
           if (deliveryFeeOrderId) {
             const { data: deliveredOrder } = await supabase.from("food_orders").select("rider_id, delivery_fee").eq("id", deliveryFeeOrderId).maybeSingle();
             if (deliveredOrder?.rider_id) await notifyPaymentReceived(deliveredOrder.rider_id, deliveredOrder.delivery_fee || data.amount, "a delivery fee");
           }
           fetchFoodOrders();
         } else {
-          Alert.alert("Payment Failed", "We could not verify your payment. You can retry from My Food Orders.");
+          showAlert("Payment Failed", "We could not verify your payment. You can retry from My Food Orders.");
         }
       } else {
-        Alert.alert("Payment Cancelled", "You can pay the delivery fee anytime from My Food Orders.");
+        showAlert("Payment Cancelled", "You can pay the delivery fee anytime from My Food Orders.");
       }
     } catch (e) {
       setShowDeliveryFeePaystack(false);
-      Alert.alert("Payment Failed", "Something went wrong verifying your payment.");
+      showAlert("Payment Failed", "Something went wrong verifying your payment.");
     }
     setDeliveryFeeOrderId(null);
     setDeliveryFeeAmount(0);
@@ -2984,14 +3185,14 @@ export default function App() {
   // ============================================================
   const pickLostItemPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to add a photo of the item."); return; }
+    if (status !== "granted") { showAlert("Permission needed", "Please allow photo access to add a photo of the item."); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3] });
     if (!r.canceled) setLostItemPhoto(r.assets[0].uri);
   };
 
   const submitLostItemReport = async () => {
-    if (!lostItemBookingId) { Alert.alert("Error", "No ride selected."); return; }
-    if (!lostItemDesc.trim()) { Alert.alert("Missing details", "Please describe the item you lost."); return; }
+    if (!lostItemBookingId) { showAlert("Error", "No ride selected."); return; }
+    if (!lostItemDesc.trim()) { showAlert("Missing details", "Please describe the item you lost."); return; }
 
     setSubmittingLostItem(true);
     const { data: { user: u } } = await supabase.auth.getUser();
@@ -3025,7 +3226,7 @@ export default function App() {
     });
 
     setSubmittingLostItem(false);
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { showAlert("Error", error.message); return; }
 
     // Notify the driver right away
     if (driverProfile?.push_token) {
@@ -3033,7 +3234,7 @@ export default function App() {
     }
 
     setLostItemDesc(""); setLostItemPhoto(null); setLostItemBookingId(null);
-    Alert.alert("Reported", "Your driver has been notified. You can track the status in Lost & Found.", [
+    showAlert("Reported", "Your driver has been notified. You can track the status in Lost & Found.", [
       { text: "OK", onPress: () => go("myLostItems") },
     ]);
   };
@@ -3140,7 +3341,7 @@ export default function App() {
       status: "rider_assigned",
       rider_id: riderId,
     }).eq("id", orderId);
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { showAlert("Error", error.message); return; }
     setActiveFoodOrderId(orderId);
     setActiveDeliveryStage("pickup");
     watchRiderLocation(orderId);
@@ -3150,13 +3351,13 @@ export default function App() {
 
   const takeProofPhoto = async (setter: (uri: string) => void) => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Camera needed", "Please allow camera access to take a proof photo — this protects both you and the client."); return; }
+    if (status !== "granted") { showAlert("Camera needed", "Please allow camera access to take a proof photo — this protects both you and the client."); return; }
     const r = await ImagePicker.launchCameraAsync({ quality: 0.5 });
     if (!r.canceled) setter(r.assets[0].uri);
   };
 
   const markFoodPickedUp = async (orderId: string) => {
-    if (!pickupProofPhoto) { Alert.alert("Photo required", "Please take a photo of the order as pickup proof."); return; }
+    if (!pickupProofPhoto) { showAlert("Photo required", "Please take a photo of the order as pickup proof."); return; }
     setUploadingProof(true);
     const photoUrl = await uploadImageToStorage(pickupProofPhoto, "delivery-proof", `${orderId}/pickup.jpg`);
     setUploadingProof(false);
@@ -3169,7 +3370,7 @@ export default function App() {
   };
 
   const markFoodDelivered = async (orderId: string) => {
-    if (!deliveryProofPhoto) { Alert.alert("Photo required", "Please take a photo as delivery proof."); return; }
+    if (!deliveryProofPhoto) { showAlert("Photo required", "Please take a photo as delivery proof."); return; }
     setUploadingProof(true);
     const photoUrl = await uploadImageToStorage(deliveryProofPhoto, "delivery-proof", `${orderId}/delivery.jpg`);
     setUploadingProof(false);
@@ -3224,7 +3425,13 @@ export default function App() {
       }
     }
 
-    Alert.alert("Delivered!", "Great job — the client will be prompted to pay the delivery fee now, and it'll land in your wallet once they do.", [{ text: "OK", onPress: () => { setActiveFoodOrderId(null); go("driverHome"); } }]);
+    setCustomAlert({
+      title: "Delivered!",
+      message: "Great job — the client will be prompted to pay the delivery fee now, and it'll land in your wallet once they do.",
+      icon: "checkmark-circle",
+      iconColor: "#2DD4BF",
+      buttons: [{ text: "OK", onPress: () => { setActiveFoodOrderId(null); go("driverHome"); } }],
+    });
   };
 
   // ============================================================
@@ -3232,14 +3439,14 @@ export default function App() {
   // ============================================================
   const pickRefundEvidence = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to add evidence."); return; }
+    if (status !== "granted") { showAlert("Permission needed", "Please allow photo access to add evidence."); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
     if (!r.canceled) setRefundEvidence(r.assets[0].uri);
   };
 
   const submitRefundRequest = async () => {
-    if (!refundReason.trim()) { Alert.alert("Missing reason", "Please explain why you're requesting a refund."); return; }
-    if (!refundTargetBookingId && !refundTargetFoodOrderId) { Alert.alert("Error", "No order selected."); return; }
+    if (!refundReason.trim()) { showAlert("Missing reason", "Please explain why you're requesting a refund."); return; }
+    if (!refundTargetBookingId && !refundTargetFoodOrderId) { showAlert("Error", "No order selected."); return; }
 
     setSubmittingRefund(true);
     const { data: { user: u } } = await supabase.auth.getUser();
@@ -3260,7 +3467,7 @@ export default function App() {
 
     if (!paymentReference) {
       setSubmittingRefund(false);
-      Alert.alert("Can't Request Refund", "This order doesn't have an online payment on file — refunds are only available for MoMo/Card payments, not cash.");
+      showAlert("Can't Request Refund", "This order doesn't have an online payment on file — refunds are only available for MoMo/Card payments, not cash.");
       return;
     }
 
@@ -3282,12 +3489,16 @@ export default function App() {
     });
 
     setSubmittingRefund(false);
-    if (error) { Alert.alert("Error", error.message); return; }
+    if (error) { showAlert("Error", error.message); return; }
 
     setRefundReason(""); setRefundEvidence(null); setRefundTargetBookingId(null); setRefundTargetFoodOrderId(null);
-    Alert.alert("Refund Requested", "An admin will review your request shortly. You can track its status in My Refund Requests.", [
-      { text: "OK", onPress: () => go("myRefundRequests") },
-    ]);
+    setCustomAlert({
+      title: "Refund Requested",
+      message: "An admin will review your request shortly. You can track its status in My Refund Requests.",
+      icon: "cash",
+      iconColor: "#2DD4BF",
+      buttons: [{ text: "OK", onPress: () => go("myRefundRequests") }],
+    });
   };
 
   const fetchMyRefundRequests = async () => {
@@ -3340,7 +3551,7 @@ export default function App() {
       }
     }
 
-    Alert.alert(
+    showAlert(
       "🚨 SOS Activated",
       `Your location has been shared with Luma admin.${contactNote}\n\nFor immediate help, call the police now.`,
       [
@@ -3376,7 +3587,7 @@ export default function App() {
   // ============================================================
   const pickPhoto = async (setter: (uri: string) => void) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed"); return; }
+    if (status !== "granted") { showAlert("Permission needed"); return; }
     const r = await ImagePicker.launchImageLibraryAsync({
       quality: 0.7,
     });
@@ -3482,7 +3693,7 @@ export default function App() {
 
   const uploadProfilePhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") { Alert.alert("Permission needed", "Please allow photo access to set a profile picture."); return; }
+    if (status !== "granted") { showAlert("Permission needed", "Please allow photo access to set a profile picture."); return; }
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsEditing: true, aspect: [1, 1] });
     if (r.canceled) return;
 
@@ -3497,7 +3708,7 @@ export default function App() {
       }
       if (!u) {
         setUploadingPhoto(false);
-        Alert.alert("Sign in required", "Profile photos can only be set on a real account. Demo accounts can't upload — please log in with an account you signed up and confirmed by email.");
+        showAlert("Sign in required", "Profile photos can only be set on a real account. Demo accounts can't upload — please log in with an account you signed up and confirmed by email.");
         return;
       }
 
@@ -3517,9 +3728,9 @@ export default function App() {
 
       await supabase.from("profiles").update({ profile_photo: publicUrl }).eq("id", u.id);
       setUser((prev: any) => ({ ...prev, profilePhoto: publicUrl }));
-      Alert.alert("Photo updated!", "Your profile picture is now visible to clients.");
+      showAlert("Photo updated!", "Your profile picture is now visible to clients.");
     } catch (e: any) {
-      Alert.alert("Upload failed", e?.message || "Could not upload photo. Please try again.");
+      showAlert("Upload failed", e?.message || "Could not upload photo. Please try again.");
     } finally {
       setUploadingPhoto(false);
     }
@@ -3542,15 +3753,15 @@ export default function App() {
   // motorbike never did).
   const submitVehicleDetails = async () => {
     const { data: { user: u } } = await supabase.auth.getUser();
-    if (!u) { Alert.alert("Error", "Please log in again."); return; }
+    if (!u) { showAlert("Error", "Please log in again."); return; }
     const needsExpiry = authRole === "car_driver" || authRole === "tuktuk_driver";
     const needsLicense = authRole === "car_driver";
     if (!vehMake || !vehColor || (needsExpiry && (!roadWorthyExpiry || !registrationExpiry))) {
-      Alert.alert("Missing details", "Please fill in all required fields.");
+      showAlert("Missing details", "Please fill in all required fields.");
       return;
     }
     if (needsLicense && (!licFront || !licBack)) {
-      Alert.alert("Missing details", "Please upload your Driver's License (front and back) — required for car drivers.");
+      showAlert("Missing details", "Please upload your Driver's License (front and back) — required for car drivers.");
       return;
     }
     let licFrontPath: string | null = null;
@@ -3569,13 +3780,48 @@ export default function App() {
     go("pending");
   };
 
+  // Name and phone only — deliberately not email, since that's tied to the
+  // actual Supabase Auth login credential and changing it needs a proper
+  // re-verification flow, not a quiet field edit that could lock someone
+  // out of their own account.
+  const saveProfileEdit = async () => {
+    if (!editName.trim()) { showAlert("Missing name", "Please enter your name."); return; }
+    setSavingProfileEdit(true);
+    const { data: { user: u } } = await supabase.auth.getUser();
+    if (!u) {
+      setSavingProfileEdit(false);
+      showAlert("Sign in required", "Profile editing needs a real account — demo accounts can't save changes.");
+      return;
+    }
+    const { error } = await supabase.from("profiles").update({
+      full_name: editName.trim(),
+      phone: editPhone.trim() || null,
+    }).eq("id", u.id);
+    setSavingProfileEdit(false);
+    if (error) {
+      showAlert("Couldn't save", error.message);
+      return;
+    }
+    setUser((prev: any) => prev ? { ...prev, name: editName.trim(), phone: editPhone.trim() } : prev);
+    setCustomAlert({
+      title: "Profile Updated",
+      message: "Your changes have been saved.",
+      icon: "checkmark-circle",
+      iconColor: "#2DD4BF",
+      buttons: [{ text: "OK", onPress: () => {
+        const isDriver = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role);
+        go(isDriver ? "driverProfile" : "clientProfile");
+      } }],
+    });
+  };
+
   const startDiditVerification = async () => {
     if (startingDiditVerification) return;
     setStartingDiditVerification(true);
     try {
       const { data: { user: u } } = await supabase.auth.getUser();
       if (!u) {
-        Alert.alert("Sign in required", "Instant verification needs a real account — demo accounts can't use this.");
+        showAlert("Sign in required", "Instant verification needs a real account — demo accounts can't use this.");
         setStartingDiditVerification(false);
         return;
       }
@@ -3591,11 +3837,11 @@ export default function App() {
         setShowDiditWebView(true);
       } else {
         console.log("create-kyc-session error:", data.error);
-        Alert.alert("Couldn't start verification", data.error ? `${data.error}\n\nPlease try again.` : "Please try again in a moment.");
+        showAlert("Couldn't start verification", data.error ? `${data.error}\n\nPlease try again.` : "Please try again in a moment.");
       }
     } catch (e) {
       setStartingDiditVerification(false);
-      Alert.alert("Couldn't start verification", "Please check your connection and try again.");
+      showAlert("Couldn't start verification", "Please check your connection and try again.");
     }
   };
 
@@ -3607,18 +3853,18 @@ export default function App() {
 
     // ── CAR DRIVER: Ghana Card + License + Road Worthy + Registration + Vehicle Photo + Selfie
     if (authRole === "car_driver") {
-      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
-      if (!licFront || !licBack) { Alert.alert("Missing", "Please upload your Driver's License (front and back)"); return; }
-      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your vehicle"); return; }
-      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
-      if (!vehMake || !vehModel || !vehPlate) { Alert.alert("Missing", "Please fill all vehicle details"); return; }
-      if (!roadWorthyExpiry || !registrationExpiry) { Alert.alert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
+      if (!idPhoto) { showAlert("Missing", "Please upload your Ghana Card"); return; }
+      if (!licFront || !licBack) { showAlert("Missing", "Please upload your Driver's License (front and back)"); return; }
+      if (!vehiclePhoto) { showAlert("Missing", "Please upload a photo of your vehicle"); return; }
+      if (!selfiePhoto) { showAlert("Missing", "Please upload a live selfie"); return; }
+      if (!vehMake || !vehModel || !vehPlate) { showAlert("Missing", "Please fill all vehicle details"); return; }
+      if (!roadWorthyExpiry || !registrationExpiry) { showAlert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
 
       const rwDate = new Date(roadWorthyExpiry);
       const regDate = new Date(registrationExpiry);
-      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { Alert.alert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
-      if (rwDate < today) { Alert.alert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
-      if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
+      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { showAlert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
+      if (rwDate < today) { showAlert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
+      if (regDate < today) { showAlert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
 
       setUploadingKycDocs(true);
       const idPhotoPath = await uploadPrivateDocument(idPhoto, "kyc-documents", `${providerId}/ghana_card.jpg`);
@@ -3643,17 +3889,17 @@ export default function App() {
 
     // ── TUK TUK: Ghana Card + Road Worthy + Registration + Vehicle Photo + Selfie (NO license)
     else if (authRole === "tuktuk_driver") {
-      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
-      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your Tuk Tuk"); return; }
-      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
-      if (!vehMake || !vehPlate) { Alert.alert("Missing", "Please fill your Tuk Tuk details"); return; }
-      if (!roadWorthyExpiry || !registrationExpiry) { Alert.alert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
+      if (!idPhoto) { showAlert("Missing", "Please upload your Ghana Card"); return; }
+      if (!vehiclePhoto) { showAlert("Missing", "Please upload a photo of your Tuk Tuk"); return; }
+      if (!selfiePhoto) { showAlert("Missing", "Please upload a live selfie"); return; }
+      if (!vehMake || !vehPlate) { showAlert("Missing", "Please fill your Tuk Tuk details"); return; }
+      if (!roadWorthyExpiry || !registrationExpiry) { showAlert("Missing", "Please enter Road Worthy and Registration expiry dates"); return; }
 
       const rwDate = new Date(roadWorthyExpiry);
       const regDate = new Date(registrationExpiry);
-      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { Alert.alert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
-      if (rwDate < today) { Alert.alert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
-      if (regDate < today) { Alert.alert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
+      if (isNaN(rwDate.getTime()) || isNaN(regDate.getTime())) { showAlert("Invalid Date", "Please enter valid dates (YYYY-MM-DD)"); return; }
+      if (rwDate < today) { showAlert("Rejected", "Your Road Worthy Certificate has expired. Please renew and resubmit."); return; }
+      if (regDate < today) { showAlert("Rejected", "Your Vehicle Registration has expired. Please renew and resubmit."); return; }
 
       setUploadingKycDocs(true);
       const idPhotoPath = await uploadPrivateDocument(idPhoto, "kyc-documents", `${providerId}/ghana_card.jpg`);
@@ -3673,10 +3919,10 @@ export default function App() {
 
     // ── MOTORBIKE: Ghana Card + Bike Photo + Selfie ONLY (no license, no road worthy, no registration)
     else if (authRole === "motorbike_rider") {
-      if (!idPhoto) { Alert.alert("Missing", "Please upload your Ghana Card"); return; }
-      if (!vehiclePhoto) { Alert.alert("Missing", "Please upload a photo of your bike"); return; }
-      if (!selfiePhoto) { Alert.alert("Missing", "Please upload a live selfie"); return; }
-      if (!vehMake || !vehColor) { Alert.alert("Missing", "Please fill your bike's make and color"); return; }
+      if (!idPhoto) { showAlert("Missing", "Please upload your Ghana Card"); return; }
+      if (!vehiclePhoto) { showAlert("Missing", "Please upload a photo of your bike"); return; }
+      if (!selfiePhoto) { showAlert("Missing", "Please upload a live selfie"); return; }
+      if (!vehMake || !vehColor) { showAlert("Missing", "Please fill your bike's make and color"); return; }
 
       setUploadingKycDocs(true);
       const idPhotoPath = await uploadPrivateDocument(idPhoto, "kyc-documents", `${providerId}/ghana_card.jpg`);
@@ -3694,10 +3940,10 @@ export default function App() {
 
     // ── RESTAURANT/VENDOR: Ghana Card + Food Safety Cert + Restaurant Photo (menu handled separately)
     else if (authRole === "restaurant") {
-      if (!idPhoto) { Alert.alert("Missing", "Please upload the owner's Ghana Card"); return; }
-      if (!foodSafetyCert) { Alert.alert("Missing", "Please upload your Food Safety Certificate"); return; }
-      if (!restaurantPhoto) { Alert.alert("Missing", "Please upload a photo of your restaurant or stall"); return; }
-      if (!businessName) { Alert.alert("Missing", "Please enter your business name"); return; }
+      if (!idPhoto) { showAlert("Missing", "Please upload the owner's Ghana Card"); return; }
+      if (!foodSafetyCert) { showAlert("Missing", "Please upload your Food Safety Certificate"); return; }
+      if (!restaurantPhoto) { showAlert("Missing", "Please upload a photo of your restaurant or stall"); return; }
+      if (!businessName) { showAlert("Missing", "Please enter your business name"); return; }
 
       setUploadingKycDocs(true);
       const idPhotoPath = await uploadPrivateDocument(idPhoto, "kyc-documents", `${providerId}/ghana_card.jpg`);
@@ -3725,7 +3971,7 @@ export default function App() {
 
     // Documents submitted — pending manual admin review
     const roleLabel = authRole === "car_driver" ? "Car Driver" : authRole === "tuktuk_driver" ? "Tuk Tuk Rider" : authRole === "motorbike_rider" ? "Motorbike Rider" : "Restaurant/Vendor";
-    Alert.alert(
+    showAlert(
       "Documents Submitted! 📋",
       `Your ${roleLabel} application is under review. Expired documents are rejected automatically. You'll typically be approved within a few hours.`,
       [{ text: "OK", onPress: () => go("pending") }]
@@ -3741,15 +3987,23 @@ export default function App() {
 
   const submitRating = async () => {
     if (!selectedRating || selectedRating === 0) {
-      Alert.alert("Select Stars", "Please select at least 1 star before submitting.");
+      showAlert("Select Stars", "Please select at least 1 star before submitting.");
       return;
     }
     setShowRatingModal(false);
     await rateDriver(pendingRatingBookingId!, selectedRating, ratingComment);
-    // Show tip modal after rating
-    setTipBookingId(pendingRatingBookingId);
-    setTipAmount(0);
-    setShowTipModal(true);
+
+    // Cash rides skip the tip prompt entirely — the driver was already paid
+    // directly in person, and tipping is meant to complement a MoMo/Card ride
+    // where the driver's payout only lands after the app processes it.
+    const { data: booking } = await supabase.from("bookings").select("payment_method").eq("id", pendingRatingBookingId).maybeSingle();
+    if (booking?.payment_method !== "cash") {
+      setTipBookingId(pendingRatingBookingId);
+      setTipAmount(0);
+      setShowTipModal(true);
+    } else {
+      go("myBookings");
+    }
     setPendingRatingBookingId(null);
     setRatingComment("");
     setSelectedRating(0);
@@ -3780,20 +4034,20 @@ export default function App() {
         setShowTipPaystack(false);
         if (data.verified) {
           haptic("success");
-          Alert.alert("Tip Sent! 🙏", `GHS ${data.amount} sent directly to your driver. 100% goes to them.`);
+          showAlert("Tip Sent! 🙏", `GHS ${data.amount} sent directly to your driver. 100% goes to them.`);
           if (tipBookingId) {
             const { data: tippedBooking } = await supabase.from("bookings").select("driver_id").eq("id", tipBookingId).maybeSingle();
             if (tippedBooking?.driver_id) await notifyPaymentReceived(tippedBooking.driver_id, data.amount, "a tip");
           }
         } else {
-          Alert.alert("Tip Failed", "We could not verify your tip payment. Your driver was not charged... or credited.");
+          showAlert("Tip Failed", "We could not verify your tip payment. Your driver was not charged... or credited.");
         }
       } else {
         setShowTipPaystack(false);
       }
     } catch (e) {
       setShowTipPaystack(false);
-      Alert.alert("Tip Failed", "Something went wrong sending your tip.");
+      showAlert("Tip Failed", "Something went wrong sending your tip.");
     }
     setTipBookingId(null);
     setTipAmount(0);
@@ -3977,7 +4231,7 @@ export default function App() {
       2: "Thanks for letting us know.",
       1: "Sorry about that. Your feedback helps us improve.",
     };
-    Alert.alert("Rating Submitted!", messages[stars] || "Thank you!");
+    showAlert("Rating Submitted!", messages[stars] || "Thank you!");
     go("myBookings");
   };
 
@@ -3993,7 +4247,7 @@ export default function App() {
 
   const submitFoodRating = async () => {
     if (!selectedFoodRating || !selectedRiderRating) {
-      Alert.alert("Select Stars", "Please rate both the food and your rider before submitting.");
+      showAlert("Select Stars", "Please rate both the food and your rider before submitting.");
       return;
     }
     const orderId = pendingFoodRatingOrderId;
@@ -4042,7 +4296,7 @@ export default function App() {
     setPendingFoodRatingOrderId(null);
     setSelectedFoodRating(0);
     setSelectedRiderRating(0);
-    Alert.alert("Thanks for rating!", "Your feedback helps keep Luma great.");
+    showAlert("Thanks for rating!", "Your feedback helps keep Luma great.");
     fetchFoodOrders();
   };
 
@@ -4113,6 +4367,12 @@ export default function App() {
         <Text style={s.navLogo}>Secure Payment</Text>
         <View />
       </View>
+      <View style={{ padding: 16, backgroundColor: "#131C2E", borderBottomWidth: 1, borderBottomColor: "#1B2A44" }}>
+        <Text style={{ color: "#8A9BB8", fontSize: 12 }}>You're paying for</Text>
+        <Text style={{ color: "#F4F6FB", fontSize: 16, fontWeight: "700", marginTop: 2 }}>{paymentDescription}</Text>
+        <Text style={{ color: "#2DD4BF", fontSize: 22, fontWeight: "bold", marginTop: 4 }}>GHS {(estFare || 20).toFixed(2)}</Text>
+        <Text style={{ color: "#5A6B85", fontSize: 11, marginTop: 2 }}>via {paymentMethod === "momo" ? "Mobile Money" : "Card"}</Text>
+      </View>
       <WebView
         source={{
           html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://js.paystack.co/v1/inline.js"></script></head><body style="margin:0;background:#0B1220;display:flex;align-items:center;justify-content:center;height:100vh;"><script>
@@ -4154,6 +4414,11 @@ export default function App() {
         <Text style={s.navLogo}>Send Tip</Text>
         <View />
       </View>
+      <View style={{ padding: 16, backgroundColor: "#131C2E", borderBottomWidth: 1, borderBottomColor: "#1B2A44" }}>
+        <Text style={{ color: "#8A9BB8", fontSize: 12 }}>Sending a tip to your driver</Text>
+        <Text style={{ color: "#2DD4BF", fontSize: 22, fontWeight: "bold", marginTop: 4 }}>GHS {tipAmount.toFixed(2)}</Text>
+        <Text style={{ color: "#5A6B85", fontSize: 11, marginTop: 2 }}>100% goes directly to them</Text>
+      </View>
       <WebView
         source={{
           html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://js.paystack.co/v1/inline.js"></script></head><body style="margin:0;background:#0B1220;display:flex;align-items:center;justify-content:center;height:100vh;"><script>
@@ -4186,13 +4451,19 @@ export default function App() {
       <View style={s.nav}>
         <TouchableOpacity onPress={() => {
           setShowFoodPaystack(false);
-          Alert.alert("Payment Cancelled", "Your order was saved but not sent to the restaurant. You can retry payment from My Food Orders.");
+          showAlert("Payment Cancelled", "Your order was saved but not sent to the restaurant. You can retry payment from My Food Orders.");
           setFoodPaymentOrderId(null);
           setFoodPaymentAmount(0);
           go("myFoodOrders");
         }}><Text style={s.navLink}>Cancel</Text></TouchableOpacity>
         <Text style={s.navLogo}>Pay for Order</Text>
         <View />
+      </View>
+      <View style={{ padding: 16, backgroundColor: "#131C2E", borderBottomWidth: 1, borderBottomColor: "#1B2A44" }}>
+        <Text style={{ color: "#8A9BB8", fontSize: 12 }}>You're paying for</Text>
+        <Text style={{ color: "#F4F6FB", fontSize: 16, fontWeight: "700", marginTop: 2 }}>Food Order</Text>
+        <Text style={{ color: "#2DD4BF", fontSize: 22, fontWeight: "bold", marginTop: 4 }}>GHS {foodPaymentAmount.toFixed(2)}</Text>
+        <Text style={{ color: "#5A6B85", fontSize: 11, marginTop: 2 }}>via {foodPaymentMethod === "momo" ? "Mobile Money" : "Card"}</Text>
       </View>
       <WebView
         source={{
@@ -4227,7 +4498,7 @@ export default function App() {
       <View style={s.nav}>
         <TouchableOpacity onPress={() => {
           setShowDeliveryFeePaystack(false);
-          Alert.alert("Payment Pending", "You can pay the delivery fee anytime from My Food Orders.");
+          showAlert("Payment Pending", "You can pay the delivery fee anytime from My Food Orders.");
           setDeliveryFeeOrderId(null);
           setDeliveryFeeAmount(0);
         }}><Text style={s.navLink}>Cancel</Text></TouchableOpacity>
@@ -4278,10 +4549,23 @@ export default function App() {
       : (driverLiveLocation || pickupPin || location);
     const hasLive = !!liveCoord;
     const hasDestination = fullMapView.lat != null && fullMapView.lng != null;
-    // Ghana-centered fallback only used if BOTH live and destination are unavailable
-    const liveLat = liveCoord?.latitude ?? fullMapView.lat ?? 6.6;
-    const liveLng = liveCoord?.longitude ?? fullMapView.lng ?? -0.9;
+    // Uses the FROZEN coords captured at open time for the initial HTML —
+    // NOT the live-updating state — so this html string stays stable across
+    // re-renders and the WebView never reloads. Ongoing position updates are
+    // handled separately via injectJavaScript (see the useEffect above).
+    const liveLat = frozenFullMapCoords?.lat ?? 6.6;
+    const liveLng = frozenFullMapCoords?.lng ?? -0.9;
     const liveLabel = fullMapView.mode === "driver" ? "You" : "Your Driver";
+    if (!frozenFullMapCoords) return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.nav}>
+          <TouchableOpacity onPress={() => setFullMapView(null)}><Text style={s.navLink}>Close</Text></TouchableOpacity>
+          <Text style={s.navLogo}>{fullMapView.label}</Text>
+          <View />
+        </View>
+        <Pulse label="Loading map..." size={32} />
+      </SafeAreaView>
+    );
     return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
@@ -4305,14 +4589,22 @@ export default function App() {
                 fetch(url).then(function(r){ return r.json(); }).then(function(data){
                   if (data && data.routes && data.routes[0] && data.routes[0].geometry) {
                     var coords = data.routes[0].geometry.coordinates.map(function(c){ return [c[1], c[0]]; });
-                    L.polyline(coords, {color: color, weight: 5, opacity: 0.85, lineJoin: "round"}).addTo(map);
+                    // Dark outline drawn first, then a brighter line on top —
+                    // gives the route real visual depth/presence against the
+                    // map, same technique Google/Apple Maps use, instead of
+                    // one flat thin line that blends into the background.
+                    L.polyline(coords, {color: "#0B1220", weight: 9, opacity: 0.55, lineJoin: "round", lineCap: "round"}).addTo(map);
+                    L.polyline(coords, {color: color, weight: 6, opacity: 1, lineJoin: "round", lineCap: "round"}).addTo(map);
                   } else {
-                    L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 3, opacity: 0.6, dashArray: "6,8"}).addTo(map);
+                    L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: "#0B1220", weight: 6, opacity: 0.4, lineCap: "round"}).addTo(map);
+                    L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 4, opacity: 0.85, dashArray: "6,8", lineCap: "round"}).addTo(map);
                   }
                 }).catch(function(){
-                  L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 3, opacity: 0.6, dashArray: "6,8"}).addTo(map);
+                  L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: "#0B1220", weight: 6, opacity: 0.4, lineCap: "round"}).addTo(map);
+                  L.polyline([[fromLat,fromLng],[toLat,toLng]], {color: color, weight: 4, opacity: 0.85, dashArray: "6,8", lineCap: "round"}).addTo(map);
                 });
               }
+              var liveMarker;
               ${hasDestination ? `
               var destLat=${fullMapView.lat}, destLng=${fullMapView.lng};
               var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true,boxZoom:true}).fitBounds([[destLat,destLng],[liveLat,liveLng]],{padding:[40,40]});
@@ -4320,14 +4612,17 @@ export default function App() {
               lumaDrawRoute(map, liveLat, liveLng, destLat, destLng, "#2DD4BF");
               var destIcon=L.divIcon({html:'<svg width="34" height="42" viewBox="0 0 34 42" xmlns="http://www.w3.org/2000/svg"><path d="M17 0C7.6 0 0 7.6 0 17c0 12 17 25 17 25s17-13 17-25C34 7.6 26.4 0 17 0z" fill="#F5A623"/><circle cx="17" cy="17" r="6" fill="#0B1220"/></svg>',iconSize:[34,42],iconAnchor:[17,42],className:"fp-dest"});
               L.marker([destLat,destLng],{icon:destIcon}).addTo(map).bindPopup(${JSON.stringify(fullMapView.label)});
-              L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
+              liveMarker = L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
               ` : `
               var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true,boxZoom:true}).setView([liveLat,liveLng],15);
               L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
-              L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
+              liveMarker = L.marker([liveLat,liveLng],{icon:liveIcon}).addTo(map).bindPopup(${JSON.stringify(liveLabel)}).openPopup();
               `}
               window.lumaMap = map;
               window.lumaRecenter = function(lat,lng){ window.lumaMap.setView([lat,lng], 16); };
+              // Moves the marker in place — called from React on every location
+              // update, instead of ever reloading this page again.
+              window.lumaUpdateLive = function(lat,lng){ if (liveMarker) liveMarker.setLatLng([lat,lng]); };
             </script></body></html>`
           }}
         />
@@ -4341,6 +4636,16 @@ export default function App() {
         {!hasDestination && (
           <Text style={{ color: "#F5A623", textAlign: "center", fontSize: 12, marginBottom: 4 }}>Couldn't pinpoint the exact address — showing your live location only</Text>
         )}
+        {fullMapView.mode === "client" && driverEtaMinutes != null && (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#2DD4BF22", borderRadius: 10, paddingVertical: 6, paddingHorizontal: 14 }}>
+              <Ionicons name="time" size={16} color="#2DD4BF" />
+              <Text style={{ color: "#2DD4BF", fontWeight: "700", marginLeft: 6, fontSize: 14 }}>
+                {driverEtaMinutes <= 1 ? "Arriving now" : `${driverEtaMinutes} min away`}
+              </Text>
+            </View>
+          </View>
+        )}
         {hasLive
           ? <Text style={{ color: "#2DD4BF", textAlign: "center", fontSize: 12 }}>{"●"} Live — updating every 3 seconds</Text>
           : <Text style={{ color: "#8A9BB8", textAlign: "center", fontSize: 12 }}>Waiting for live location...</Text>
@@ -4353,6 +4658,40 @@ export default function App() {
   // VEHICLE DETAILS — mandatory step after Didit verification for driver
   // roles. Identity is Didit's job; this is purely "what shows up on the
   // client's screen" info, so it doesn't need photos or admin approval.
+  // EDIT PROFILE — shared by client and driver. Name/phone only; email isn't
+  // editable here since it's the actual login credential.
+  if (screen === "editProfile") return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <TouchableOpacity onPress={() => {
+          const isDriver = ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role);
+          go(isDriver ? "driverProfile" : "clientProfile");
+        }}><Text style={s.navLink}>Back</Text></TouchableOpacity>
+        <Text style={s.navLogo}>Edit Profile</Text>
+        <View />
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 6 }}>Full Name</Text>
+        <TextInput style={s.input} placeholder="Your name" placeholderTextColor="#5A6B85" value={editName} onChangeText={setEditName} />
+        <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 6 }}>Phone Number</Text>
+        <TextInput style={s.input} placeholder="Your phone number" placeholderTextColor="#5A6B85" value={editPhone} onChangeText={setEditPhone} keyboardType="phone-pad" />
+        <View style={[s.card, { marginTop: 4 }]}>
+          <Text style={{ color: "#8A9BB8", fontSize: 12 }}>
+            <Ionicons name="mail" size={13} color="#8A9BB8" /> Email: {user?.email}
+          </Text>
+          <Text style={{ color: "#5A6B85", fontSize: 11, marginTop: 4 }}>Email can't be changed here since it's your login — contact support if you need it updated.</Text>
+        </View>
+        {savingProfileEdit ? (
+          <Pulse label="Saving..." size={28} />
+        ) : (
+          <TouchableOpacity style={s.btn} onPress={saveProfileEdit}>
+            <Text style={s.btnTxt}>Save Changes</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+
   if (screen === "vehicleDetails") return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
@@ -4556,20 +4895,6 @@ export default function App() {
             <Text style={s.btnTxt}>{tipAmount > 0 ? `Send GHS ${tipAmount} Tip` : "Skip Tip"}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[s.btnOut, { width: "100%", marginTop: 10 }]}
-            onPress={async () => {
-              const booking = clientBookings.find(b => b.id === tipBookingId);
-              if (booking?.driver_id) {
-                const { data: driverProfile } = await supabase.from("profiles").select("full_name").eq("id", booking.driver_id).maybeSingle();
-                addFavouriteDriver(booking.driver_id, driverProfile?.full_name || "Driver");
-              } else {
-                Alert.alert("Not Available", "Driver info not found for this ride.");
-              }
-            }}>
-            <Text style={s.btnOutTxt}><Ionicons name="star" size={16} color="#2DD4BF" /> Add Driver to Favourites</Text>
-          </TouchableOpacity>
-
           <TouchableOpacity style={{ marginTop: 14 }} onPress={() => { setShowTipModal(false); go("myBookings"); }}>
             <Text style={{ color: "#5A6B85", fontSize: 13 }}>No thanks</Text>
           </TouchableOpacity>
@@ -4579,12 +4904,71 @@ export default function App() {
   );
 
   // RATING MODAL — must be checked BEFORE screen renders so it takes priority
-  if (showRatingModal) return (
+  // Branded confirmation modal — replaces plain native Alert.alert popups for
+  // the moments that matter most (ride complete, delivery complete), since
+  // those can't be restyled and look jarring against the app's dark theme.
+  if (customAlert) return (
+    <SafeAreaView style={s.safe}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+        <View style={{ backgroundColor: "#131C2E", borderRadius: 16, padding: 28, width: "100%", alignItems: "center", borderWidth: 1, borderColor: "#2DD4BF33" }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: `${customAlert.iconColor}22`, alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+            <Ionicons name={customAlert.icon as any} size={32} color={customAlert.iconColor} />
+          </View>
+          <Text style={{ color: "#F4F6FB", fontSize: 19, fontWeight: "bold", textAlign: "center", marginBottom: 8 }}>{customAlert.title}</Text>
+          {!!customAlert.message && (
+            <Text style={{ color: "#8A9BB8", fontSize: 14, textAlign: "center", lineHeight: 20, marginBottom: 24 }}>{customAlert.message}</Text>
+          )}
+          <View style={{ width: "100%", gap: 10 }}>
+            {customAlert.buttons.map((btn, i) => {
+              const isDestructive = btn.style === "destructive";
+              const isCancel = btn.style === "cancel";
+              const buttonStyle = isDestructive
+                ? [s.btn, { width: "100%", backgroundColor: "#F87171" }]
+                : isCancel
+                ? [s.btnOut, { width: "100%" }]
+                : [s.btn, { width: "100%" }];
+              const textStyle = isDestructive
+                ? [s.btnTxt, { color: "#fff" }]
+                : isCancel
+                ? s.btnOutTxt
+                : s.btnTxt;
+              return (
+                <TouchableOpacity
+                  key={i}
+                  style={buttonStyle as any}
+                  onPress={() => {
+                    const onPress = btn.onPress;
+                    setCustomAlert(null);
+                    if (onPress) onPress();
+                  }}>
+                  <Text style={textStyle}>{btn.text}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+
+  if (showRatingModal) {
+    const ratedBooking = clientBookings.find(b => b.id === pendingRatingBookingId);
+    return (
     <SafeAreaView style={s.safe}>
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
         <View style={{ backgroundColor: "#131C2E", borderRadius: 16, padding: 28, width: "100%", alignItems: "center" }}>
           <Ionicons name="car-sport" size={40} color="#2DD4BF" />
           <Text style={{ color: "#F4F6FB", fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 4 }}>How was your ride?</Text>
+          {ratedBooking && (
+            <View style={{ backgroundColor: "#0B1220", borderRadius: 8, padding: 10, marginBottom: 12, width: "100%" }}>
+              <Text style={{ color: "#8A9BB8", fontSize: 12, textAlign: "center" }} numberOfLines={1}>
+                {ratedBooking.pickup?.split(",")[0]} → {ratedBooking.dropoff?.split(",")[0]}
+              </Text>
+              <Text style={{ color: "#5A6B85", fontSize: 11, textAlign: "center", marginTop: 2 }}>
+                {ratedBooking.time ? `at ${ratedBooking.time}` : ""} · GHS {ratedBooking.price}
+              </Text>
+            </View>
+          )}
           <Text style={{ color: "#8A9BB8", fontSize: 13, textAlign: "center", marginBottom: 24 }}>Your feedback helps improve our service and keeps drivers accountable.</Text>
 
           <Text style={{ color: "#2DD4BF", fontSize: 13, fontWeight: "700", marginBottom: 12 }}>TAP TO RATE</Text>
@@ -4619,6 +5003,20 @@ export default function App() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[s.btnOut, { width: "100%", marginTop: 10 }]}
+            onPress={async () => {
+              const { data: booking } = await supabase.from("bookings").select("driver_id").eq("id", pendingRatingBookingId).maybeSingle();
+              if (booking?.driver_id) {
+                const { data: driverProfile } = await supabase.from("profiles").select("full_name").eq("id", booking.driver_id).maybeSingle();
+                addFavouriteDriver(booking.driver_id, driverProfile?.full_name || "Driver");
+              } else {
+                showAlert("Not Available", "Driver info not found for this ride.");
+              }
+            }}>
+            <Text style={s.btnOutTxt}><Ionicons name="star" size={16} color="#2DD4BF" /> Add Driver to Favourites</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={{ marginTop: 14 }}
             onPress={() => { setShowRatingModal(false); go("myBookings"); }}>
             <Text style={{ color: "#5A6B85", fontSize: 13 }}>Skip for now</Text>
@@ -4626,7 +5024,8 @@ export default function App() {
         </View>
       </View>
     </SafeAreaView>
-  );
+    );
+  }
 
   // FOOD DELIVERY — RATING MODAL (food quality + rider, separately)
   if (showFoodRatingModal) return (
@@ -5119,7 +5518,7 @@ export default function App() {
           )}
         <TouchableOpacity style={[s.btnOut, { width: "100%" }]} onPress={async () => {
           const { error } = await supabase.auth.resend({ type: "signup", email: authEmail });
-          Alert.alert(error ? "Error" : "Sent!", error ? error.message : "A new code has been sent — check your inbox.");
+          showAlert(error ? "Error" : "Sent!", error ? error.message : "A new code has been sent — check your inbox.");
         }}>
           <Text style={s.btnOutTxt}>Resend Code</Text>
         </TouchableOpacity>
@@ -5147,11 +5546,11 @@ export default function App() {
           const { data: profile } = await supabase.from("profiles").select("is_verified, suspended, suspension_reason, role").eq("id", u.id).maybeSingle();
           if (profile?.is_verified) {
             setUser((prev: any) => ({ ...prev, verified: true }));
-            Alert.alert("Approved! ✅", "Welcome to Luma! You can start receiving rides now.", [{ text: "Let's Go!", onPress: () => go(profile.role === "restaurant" ? "restaurantHome" : "driverHome") }]);
+            showAlert("Approved! ✅", "Welcome to Luma! You can start receiving rides now.", [{ text: "Let's Go!", onPress: () => go(profile.role === "restaurant" ? "restaurantHome" : "driverHome") }]);
           } else if (profile?.suspended) {
-            Alert.alert("Application Rejected", profile.suspension_reason || "Please contact support for details.");
+            showAlert("Application Rejected", profile.suspension_reason || "Please contact support for details.");
           } else {
-            Alert.alert("Still Under Review", "Your application hasn't been reviewed yet. Please check back soon.");
+            showAlert("Still Under Review", "Your application hasn't been reviewed yet. Please check back soon.");
           }
         }}>
           <Text style={s.btnTxt}><Ionicons name="refresh" size={16} color="#2DD4BF" /> Check Status</Text>
@@ -5289,25 +5688,46 @@ export default function App() {
   );
 
   // RESTAURANT INCOMING ORDERS
-  if (screen === "restaurantIncomingOrders") return (
+  if (screen === "restaurantIncomingOrders") {
+    const activeStatuses = ["pending", "preparing", "ready_for_pickup", "rider_assigned", "picked_up"];
+    const activeOrders = incomingFoodOrders.filter(o => activeStatuses.includes(o.status));
+    const historyOrders = incomingFoodOrders.filter(o => !activeStatuses.includes(o.status));
+    const shownOrders = showFoodHistory ? historyOrders : activeOrders;
+    return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("restaurantHome")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
-        <Text style={s.navLogo}>Incoming Orders</Text>
+        <Text style={s.navLogo}>{showFoodHistory ? "Order History" : "Incoming Orders"}</Text>
         <View />
       </View>
+      <View style={{ flexDirection: "row", paddingHorizontal: 20, paddingTop: 16, gap: 8 }}>
+        <TouchableOpacity
+          onPress={() => setShowFoodHistory(false)}
+          style={{ flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center", backgroundColor: !showFoodHistory ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: !showFoodHistory ? "#2DD4BF" : "#333" }}>
+          <Text style={{ color: !showFoodHistory ? "#000" : "#F4F6FB", fontWeight: "700", fontSize: 13 }}>Active ({activeOrders.length})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setShowFoodHistory(true)}
+          style={{ flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center", backgroundColor: showFoodHistory ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: showFoodHistory ? "#2DD4BF" : "#333" }}>
+          <Text style={{ color: showFoodHistory ? "#000" : "#F4F6FB", fontWeight: "700", fontSize: 13 }}>History ({historyOrders.length})</Text>
+        </TouchableOpacity>
+      </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        {incomingFoodOrders.length === 0 ? (
-          <EmptyState icon="receipt-outline" title="No orders yet" subtitle="New food orders will appear here the moment a client places one." />
+        {shownOrders.length === 0 ? (
+          <EmptyState
+            icon="receipt-outline"
+            title={showFoodHistory ? "No past orders yet" : "No active orders right now"}
+            subtitle={showFoodHistory ? "Completed and cancelled orders will show up here." : "New food orders will appear here the moment a client places one."}
+          />
         ) : (
-          incomingFoodOrders.map((order) => (
+          shownOrders.map((order) => (
             <View key={order.id} style={s.card}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <Text style={s.cardTitle}>{order.client_name}</Text>
                 <View style={[s.badge, {
-                  backgroundColor: order.status === "pending" ? "#F5A62322" : order.status === "preparing" ? "#5B8FE022" : order.status === "ready_for_pickup" ? "#2DD4BF22" : "#8A9BB822"
+                  backgroundColor: order.status === "pending" ? "#F5A62322" : order.status === "preparing" ? "#5B8FE022" : order.status === "ready_for_pickup" ? "#2DD4BF22" : order.status === "delivered" ? "#2DD4BF22" : order.status === "cancelled" ? "#F8717122" : "#8A9BB822"
                 }]}>
-                  <Text style={{ color: order.status === "pending" ? "#F5A623" : order.status === "preparing" ? "#5B8FE0" : order.status === "ready_for_pickup" ? "#2DD4BF" : "#8A9BB8", fontSize: 11, fontWeight: "700" }}>
+                  <Text style={{ color: order.status === "pending" ? "#F5A623" : order.status === "preparing" ? "#5B8FE0" : order.status === "ready_for_pickup" ? "#2DD4BF" : order.status === "delivered" ? "#2DD4BF" : order.status === "cancelled" ? "#F87171" : "#8A9BB8", fontSize: 11, fontWeight: "700" }}>
                     {order.status === "pending" ? "NEW" : order.status === "preparing" ? "PREPARING" : order.status === "ready_for_pickup" ? "READY — AWAITING RIDER" : order.status.toUpperCase()}
                   </Text>
                 </View>
@@ -5330,6 +5750,7 @@ export default function App() {
       </ScrollView>
     </SafeAreaView>
   );
+  }
 
   // DRIVER HOME
   if (screen === "driverHome") return (
@@ -5536,6 +5957,17 @@ export default function App() {
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={s.card}>
           <Text style={s.cardTitle}><Ionicons name="car-sport" size={15} color="#F4F6FB" /> Ride in Progress</Text>
+          {activeOrder?.recipient_name ? (
+            <View style={{ backgroundColor: "#F5A62322", borderRadius: 8, padding: 10, marginTop: 8, marginBottom: 4 }}>
+              <Text style={{ color: "#F5A623", fontWeight: "700", fontSize: 13 }}>
+                <Ionicons name="person" size={14} color="#F5A623" /> Picking up: {activeOrder.recipient_name}
+              </Text>
+              {activeOrder?.recipient_phone && (
+                <Text style={{ color: "#F5A623", fontSize: 12, marginTop: 2 }}>{activeOrder.recipient_phone}</Text>
+              )}
+              <Text style={{ color: "#8A9BB8", fontSize: 11, marginTop: 4 }}>Booked by {activeOrder?.client_name} — not the person you'll be picking up</Text>
+            </View>
+          ) : null}
           <Text style={{ color: "#8A9BB8", fontSize: 13, marginTop: 4 }}><Ionicons name="location" size={13} color="#8A9BB8" /> Pickup: {activeOrder?.pickup}</Text>
           <Text style={{ color: "#8A9BB8", fontSize: 13 }}><Ionicons name="flag" size={13} color="#8A9BB8" /> Dropoff: {activeOrder?.dropoff}</Text>
           <Text style={{ color: "#2DD4BF", marginTop: 4 }}>Navigate to pickup location</Text>
@@ -5566,32 +5998,53 @@ export default function App() {
           </View>
         </Tappable>
 
-        <Text style={s.sectionTitle}>IN-APP CHAT</Text>
-        <View style={{ backgroundColor: "#131C2E", borderRadius: 12, padding: 12, marginBottom: 8, minHeight: 120 }}>
-          {chatMessages.length === 0
-            ? <Text style={{ color: "#5A6B85", textAlign: "center", marginTop: 20 }}>No messages yet — say hello 👋</Text>
-            : chatMessages.map((m, i) => (
-              <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
-                <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                {m.image_url
-                  ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                  : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
-              </View>
-            ))
-          }
-        </View>
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-          <TouchableOpacity
-            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
-            disabled={uploadingChatPhoto}
-            onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
-            {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
-          </TouchableOpacity>
-          <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
-          <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
-            <Text style={s.btnTxt}>Send</Text>
-          </TouchableOpacity>
-        </View>
+        {(() => {
+          const lastMsg = chatMessages[chatMessages.length - 1];
+          const hasUnread = !!lastMsg && lastMsg.sender_id !== user?.id && lastMsg.id !== lastSeenChatMessageId;
+          return (
+            <>
+              <TouchableOpacity
+                onPress={() => { setChatOpen(!chatOpen); if (!chatOpen && lastMsg) setLastSeenChatMessageId(lastMsg.id); }}
+                style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: chatOpen ? 8 : 16 }]}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#2DD4BF" />
+                  <Text style={{ color: "#F4F6FB", fontWeight: "700", marginLeft: 8 }}>Chat with Client</Text>
+                  {hasUnread && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#F87171", marginLeft: 8 }} />}
+                </View>
+                <Ionicons name={chatOpen ? "chevron-up" : "chevron-down"} size={18} color="#8A9BB8" />
+              </TouchableOpacity>
+              {chatOpen && (
+                <>
+                  <View style={{ backgroundColor: "#131C2E", borderRadius: 12, padding: 12, marginBottom: 8, minHeight: 120 }}>
+                    {chatMessages.length === 0
+                      ? <Text style={{ color: "#5A6B85", textAlign: "center", marginTop: 20 }}>No messages yet — say hello 👋</Text>
+                      : chatMessages.map((m, i) => (
+                        <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
+                          <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
+                          {m.image_url
+                            ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
+                            : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                        </View>
+                      ))
+                    }
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                    <TouchableOpacity
+                      style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
+                      disabled={uploadingChatPhoto}
+                      onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
+                      {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
+                    </TouchableOpacity>
+                    <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
+                    <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
+                      <Text style={s.btnTxt}>Send</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </>
+          );
+        })()}
 
         {driverArrivedAt && !tripStarted && (
           <View style={[s.card, { borderColor: waitingCharge > 0 ? "#f5a623" : "#2DD4BF", borderWidth: 1 }]}>
@@ -5735,6 +6188,11 @@ export default function App() {
           <View style={[s.badge, { backgroundColor: "#1a2a1a", marginTop: 6, alignSelf: "center" }]}>
             <Text style={{ color: "#2DD4BF", fontSize: 12 }}><Ionicons name="star" size={16} color="#2DD4BF" /> {driverRating} average rating</Text>
           </View>
+          <TouchableOpacity
+            style={[s.btnOut, { marginTop: 12 }]}
+            onPress={() => { setEditName(user?.name || ""); setEditPhone(user?.phone || ""); go("editProfile"); }}>
+            <Text style={s.btnOutTxt}><Ionicons name="pencil" size={14} color="#2DD4BF" /> Edit Profile</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={s.sectionTitle}>EARNINGS</Text>
@@ -6167,7 +6625,7 @@ export default function App() {
         <TouchableOpacity
           style={[s.btnOut, { marginBottom: 8 }]}
           onPress={async () => {
-            if (!location) { Alert.alert("Location unavailable", "Please enter your address manually."); return; }
+            if (!location) { showAlert("Location unavailable", "Please enter your address manually."); return; }
             const address = await reverseGeocode(location.latitude, location.longitude);
             setFoodDeliveryAddress(address);
           }}>
@@ -6190,7 +6648,7 @@ export default function App() {
         <TouchableOpacity
           style={[s.btn, { marginTop: 16 }]}
           onPress={() => {
-            if (!foodDeliveryAddress.trim()) { Alert.alert("Missing address", "Please enter where this order should be delivered."); return; }
+            if (!foodDeliveryAddress.trim()) { showAlert("Missing address", "Please enter where this order should be delivered."); return; }
             const lat = location?.latitude || 6.6;
             const lng = location?.longitude || -0.9;
             submitFoodOrder(foodDeliveryAddress, lat, lng, foodDeliveryPayment);
@@ -6420,12 +6878,15 @@ export default function App() {
                         .then(function(data){
                           if (data && data.routes && data.routes[0] && data.routes[0].geometry) {
                             var coords = data.routes[0].geometry.coordinates.map(function(c){ return [c[1], c[0]]; });
-                            L.polyline(coords, {color:"#2DD4BF", weight:5, opacity:0.85, lineJoin:"round"}).addTo(map);
+                            L.polyline(coords, {color:"#0B1220", weight:9, opacity:0.55, lineJoin:"round", lineCap:"round"}).addTo(map);
+                            L.polyline(coords, {color:"#2DD4BF", weight:6, opacity:1, lineJoin:"round", lineCap:"round"}).addTo(map);
                           } else {
-                            L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:3, opacity:0.6, dashArray:"6,8"}).addTo(map);
+                            L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#0B1220", weight:6, opacity:0.4, lineCap:"round"}).addTo(map);
+                            L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:4, opacity:0.85, dashArray:"6,8", lineCap:"round"}).addTo(map);
                           }
                         }).catch(function(){
-                          L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:3, opacity:0.6, dashArray:"6,8"}).addTo(map);
+                          L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#0B1220", weight:6, opacity:0.4, lineCap:"round"}).addTo(map);
+                          L.polyline([[myLat,myLng],[destLat,destLng]], {color:"#2DD4BF", weight:4, opacity:0.85, dashArray:"6,8", lineCap:"round"}).addTo(map);
                         });
                       var meIcon=L.divIcon({html:'<div style="width:20px;height:20px;background:#FF5722;border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4);"></div>',iconSize:[20,20],className:""});
                       var destIcon=L.divIcon({html:'<svg width="32" height="40" viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg"><path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 24 16 24s16-12.8 16-24C32 7.2 24.8 0 16 0z" fill="#2DD4BF"/><circle cx="16" cy="16" r="6" fill="#04231F"/></svg>',iconSize:[32,40],iconAnchor:[16,40],className:""});
@@ -6488,6 +6949,21 @@ export default function App() {
             ))}
           </View>
         )}
+        <TouchableOpacity
+          style={[s.btnOut, { marginBottom: 12 }]}
+          onPress={async () => {
+            if (!location) { showAlert("Location unavailable", "Please enter the pickup address manually."); return; }
+            setPickupText("Finding you on the map...");
+            const address = await reverseGeocode(location.latitude, location.longitude);
+            setPickupText(address);
+            setPickupPin({ latitude: location.latitude, longitude: location.longitude });
+            if (dropoffPin) updateFare(location.latitude, location.longitude, dropoffPin.latitude, dropoffPin.longitude);
+          }}>
+          <Text style={s.btnOutTxt}><Ionicons name="locate" size={14} color="#2DD4BF" /> Use My Current Location</Text>
+        </TouchableOpacity>
+        <Text style={{ color: "#5A6B85", fontSize: 11, marginTop: -8, marginBottom: 12 }}>
+          Picking someone else up? Just search their location above instead — current location is only used if you tap the button.
+        </Text>
 
         <Text style={s.sectionTitle}>DROPOFF LOCATION</Text>
         <TextInput style={s.input} placeholder="Search dropoff address..." placeholderTextColor="#5A6B85" value={dropoffText} onChangeText={dropoffChange} onFocus={() => setActiveField("dropoff")} />
@@ -6640,6 +7116,69 @@ export default function App() {
           </>
         )}
 
+        <TouchableOpacity
+          onPress={() => setShowMoreBookingOptions(!showMoreBookingOptions)}
+          style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: showMoreBookingOptions ? 12 : 16 }]}>
+          <View>
+            <Text style={{ color: "#F4F6FB", fontWeight: "700" }}>More Options</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 2 }}>
+              {bookingForSomeoneElse ? `For ${recipientName || "someone else"}` : "For myself"}
+              {bookingQuantity > 1 ? ` · ${bookingQuantity} rides` : ""}
+            </Text>
+          </View>
+          <Ionicons name={showMoreBookingOptions ? "chevron-up" : "chevron-down"} size={18} color="#8A9BB8" />
+        </TouchableOpacity>
+
+        {showMoreBookingOptions && (
+          <>
+            <Text style={s.sectionTitle}>WHO IS THIS RIDE FOR?</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+              <TouchableOpacity
+                onPress={() => setBookingForSomeoneElse(false)}
+                style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: !bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: !bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
+                <Text style={{ color: !bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Myself</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setBookingForSomeoneElse(true)}
+                style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
+                <Text style={{ color: bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Someone Else</Text>
+              </TouchableOpacity>
+            </View>
+            {bookingForSomeoneElse && (
+              <View style={[s.card, { marginBottom: 12 }]}>
+                <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+                  We'll pass their name and number to the driver, and text them the ride details if they're on Luma too.
+                </Text>
+                <TextInput style={s.input} placeholder="Their name (e.g. your son, a relative)" placeholderTextColor="#5A6B85" value={recipientName} onChangeText={setRecipientName} />
+                <TextInput style={[s.input, { marginBottom: 0 }]} placeholder="Their phone number" placeholderTextColor="#5A6B85" value={recipientPhone} onChangeText={setRecipientPhone} keyboardType="phone-pad" />
+              </View>
+            )}
+
+            <Text style={s.sectionTitle}>HOW MANY RIDES?</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+              Going out with friends and need more than one car? Book several rides — same pickup and drop-off, dispatched to separate drivers, one at a time.
+            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 16 }}>
+              <TouchableOpacity
+                onPress={() => setBookingQuantity(Math.max(1, bookingQuantity - 1))}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#333", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="remove" size={20} color="#2DD4BF" />
+              </TouchableOpacity>
+              <Text style={{ color: "#F4F6FB", fontSize: 22, fontWeight: "bold", minWidth: 40, textAlign: "center" }}>{bookingQuantity}</Text>
+              <TouchableOpacity
+                onPress={() => setBookingQuantity(Math.min(6, bookingQuantity + 1))}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#333", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="add" size={20} color="#2DD4BF" />
+              </TouchableOpacity>
+            </View>
+            {bookingQuantity > 1 && (
+              <Text style={{ color: "#F5A623", fontSize: 12, textAlign: "center", marginBottom: 4 }}>
+                This will create {bookingQuantity} separate ride requests, GHS {estFare ? (estFare * bookingQuantity) : "—"} total.
+              </Text>
+            )}
+          </>
+        )}
+
         <Text style={s.sectionTitle}>PAYMENT METHOD</Text>
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
           {[["cash", "cash-outline", "Cash"], ["momo", "phone-portrait-outline", "MoMo"], ["card", "card-outline", "Card"]].map(([val, icon, label]) => (
@@ -6688,12 +7227,16 @@ export default function App() {
           </View>
         )}
 
-        {submittingRide ? (
-          <Pulse label="Booking your ride..." size={32} />
+        {submittingRide || submittingBulkBooking ? (
+          <Pulse label={bookingQuantity > 1 ? `Booking ${bookingQuantity} rides...` : "Booking your ride..."} size={32} />
         ) : (
           <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={submitRide}>
             <Text style={s.btnTxt}>
-              <Ionicons name="car-sport" size={16} color="#000" /> {promoApplied?.discount >= 100 ? "Book FREE Ride" : estFare && promoApplied ? `Book — GHS ${calcDiscountedFare(estFare)}` : "Confirm Booking"}
+              <Ionicons name="car-sport" size={16} color="#000" /> {
+                bookingQuantity > 1
+                  ? `Book ${bookingQuantity} Rides`
+                  : promoApplied?.discount >= 100 ? "Book FREE Ride" : estFare && promoApplied ? `Book — GHS ${calcDiscountedFare(estFare)}` : "Confirm Booking"
+              }
             </Text>
           </TouchableOpacity>
         )}
@@ -6727,6 +7270,11 @@ export default function App() {
           <View style={[s.badge, { backgroundColor: "#1a3a1a", marginTop: 8, alignSelf: "center" }]}>
             <Text style={{ color: "#2DD4BF", fontSize: 12 }}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Verified Client</Text>
           </View>
+          <TouchableOpacity
+            style={[s.btnOut, { marginTop: 12 }]}
+            onPress={() => { setEditName(user?.name || ""); setEditPhone(user?.phone || ""); go("editProfile"); }}>
+            <Text style={s.btnOutTxt}><Ionicons name="pencil" size={14} color="#2DD4BF" /> Edit Profile</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={s.sectionTitle}>ACCOUNT</Text>
@@ -6791,7 +7339,7 @@ export default function App() {
             <TouchableOpacity
               style={[s.btnOut, { marginTop: 4 }]}
               onPress={async () => {
-                if (!location) { Alert.alert("Location unavailable", "Please search for your address manually instead."); return; }
+                if (!location) { showAlert("Location unavailable", "Please search for your address manually instead."); return; }
                 const address = await reverseGeocode(location.latitude, location.longitude);
                 saveHomeAddress(address, location.latitude, location.longitude);
               }}>
@@ -6929,7 +7477,7 @@ export default function App() {
             </Text>
           </View>
 
-          <TouchableOpacity style={[s.card, { width: "100%" }]} onPress={() => Alert.alert("Legal", "Full Terms of Service and Privacy Policy will be published here ahead of launch.")}>
+          <TouchableOpacity style={[s.card, { width: "100%" }]} onPress={() => showAlert("Legal", "Full Terms of Service and Privacy Policy will be published here ahead of launch.")}>
             <Text style={s.cardTitle}><Ionicons name="document-text" size={16} color="#2DD4BF" /> Terms & Privacy</Text>
             <Text style={s.cardSub}>Coming soon</Text>
           </TouchableOpacity>
@@ -7035,29 +7583,34 @@ export default function App() {
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 16 }}>Book a vehicle by the hour for errands, waiting time, or multiple stops. Payment is made after the hire period ends.</Text>
+        <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 16 }}>
+          {hireVehicle === "motorbike"
+            ? "Hire a rider by the hour for multiple parcel or food errands — not a passenger ride. Payment is made after the hire period ends."
+            : "Book a vehicle by the hour for errands, waiting time, or multiple stops. Payment is made after the hire period ends."}
+        </Text>
 
         <Text style={s.sectionTitle}>SELECT VEHICLE</Text>
         <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
           {[
-            ["car", "car-sport", "Car", 110],
-            ["tuktuk", "car", "Tuk Tuk", 65],
+            ["car", "car-sport", "Car", 180],
+            ["tuktuk", "car", "Tuk Tuk", 115],
+            ["motorbike", "bicycle", "Delivery Rider", 80],
           ].map(([val, icon, label, rate]) => (
             <TouchableOpacity
               key={val as string}
               onPress={() => setHireVehicle(val as string)}
               style={{ flex: 1, padding: 14, borderRadius: 10, backgroundColor: hireVehicle === val ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: hireVehicle === val ? "#2DD4BF" : "#333", alignItems: "center" }}>
               <Ionicons name={icon as any} size={24} color={hireVehicle === val ? "#000" : "#2DD4BF"} />
-              <Text style={{ color: hireVehicle === val ? "#000" : "#F4F6FB", fontWeight: "bold", marginTop: 4 }}>{label}</Text>
+              <Text style={{ color: hireVehicle === val ? "#000" : "#F4F6FB", fontWeight: "bold", marginTop: 4, textAlign: "center" }}>{label}</Text>
               <Text style={{ color: hireVehicle === val ? "#000" : "#8A9BB8", fontSize: 12 }}>GHS {rate}/hr</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={s.sectionTitle}>PICKUP LOCATION</Text>
+        <Text style={s.sectionTitle}>{hireVehicle === "motorbike" ? "STARTING LOCATION" : "PICKUP LOCATION"}</Text>
         <TextInput
           style={s.input}
-          placeholder="Where should the driver meet you?"
+          placeholder={hireVehicle === "motorbike" ? "Where should the rider start from?" : "Where should the driver meet you?"}
           placeholderTextColor="#5A6B85"
           value={hirePickup}
           onChangeText={async (t) => {
@@ -7155,7 +7708,7 @@ export default function App() {
               {(b.status === "pending" || b.status === "accepted") && (
                 <TouchableOpacity
                   style={[s.btnRed, { marginTop: 6 }]}
-                  onPress={() => Alert.alert(
+                  onPress={() => showAlert(
                     "Cancel Booking?",
                     b.status === "pending"
                       ? "No charge — driver hasn't accepted yet."
@@ -7460,32 +8013,53 @@ export default function App() {
             : <Text style={{ color: "#8A9BB8", textAlign: "center", marginBottom: 12 }}>Waiting for driver location...</Text>
           }
 
-          <Text style={s.sectionTitle}>CHAT WITH DRIVER</Text>
-          <View style={{ backgroundColor: "#131C2E", borderRadius: 12, padding: 12, marginBottom: 8, minHeight: 120 }}>
-            {chatMessages.length === 0
-              ? <Text style={{ color: "#5A6B85", textAlign: "center", marginTop: 20 }}>No messages yet — say hello 👋</Text>
-              : chatMessages.map((m, i) => (
-                <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
-                  <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                  {m.image_url
-                    ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                    : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
-                </View>
-              ))
-            }
-          </View>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-            <TouchableOpacity
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
-              disabled={uploadingChatPhoto}
-              onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
-              {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
-            </TouchableOpacity>
-            <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
-            <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
-              <Text style={s.btnTxt}>Send</Text>
-            </TouchableOpacity>
-          </View>
+          {(() => {
+            const lastMsg = chatMessages[chatMessages.length - 1];
+            const hasUnread = !!lastMsg && lastMsg.sender_id !== user?.id && lastMsg.id !== lastSeenChatMessageId;
+            return (
+              <>
+                <TouchableOpacity
+                  onPress={() => { setChatOpen(!chatOpen); if (!chatOpen && lastMsg) setLastSeenChatMessageId(lastMsg.id); }}
+                  style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: chatOpen ? 8 : 16 }]}>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <Ionicons name="chatbubble-ellipses" size={18} color="#2DD4BF" />
+                    <Text style={{ color: "#F4F6FB", fontWeight: "700", marginLeft: 8 }}>Chat with Driver</Text>
+                    {hasUnread && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#F87171", marginLeft: 8 }} />}
+                  </View>
+                  <Ionicons name={chatOpen ? "chevron-up" : "chevron-down"} size={18} color="#8A9BB8" />
+                </TouchableOpacity>
+                {chatOpen && (
+                  <>
+                    <View style={{ backgroundColor: "#131C2E", borderRadius: 12, padding: 12, marginBottom: 8, minHeight: 120 }}>
+                      {chatMessages.length === 0
+                        ? <Text style={{ color: "#5A6B85", textAlign: "center", marginTop: 20 }}>No messages yet — say hello 👋</Text>
+                        : chatMessages.map((m, i) => (
+                          <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
+                            <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
+                            {m.image_url
+                              ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
+                              : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                          </View>
+                        ))
+                      }
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                      <TouchableOpacity
+                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}
+                        disabled={uploadingChatPhoto}
+                        onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
+                        {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
+                      </TouchableOpacity>
+                      <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
+                      <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
+                        <Text style={s.btnTxt}>Send</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </>
+            );
+          })()}
 
           {sosCountdown > 0 ? (
             <View style={[s.sosBtn, { backgroundColor: "#F87171", borderColor: "#F87171" }]}>
