@@ -806,18 +806,20 @@ export default function App() {
   const toggleOnline = async (value: boolean) => {
     if (value) {
       // Going online requires being fully verified — identity for everyone,
-      // PLUS license approval for car drivers specifically, since Didit only
-      // ever checks identity, never driving eligibility. Queried fresh here
-      // rather than trusting cached user state, which could be stale if
-      // approval happened after this session's login.
+      // PLUS license approval for car drivers, but ONLY those who went
+      // through the NEW Didit flow (didit_status is set). Drivers approved
+      // under the OLD system — before Didit or this separate license check
+      // existed — already had their license reviewed as part of that single
+      // approval; retroactively blocking them over a field that didn't exist
+      // yet when they were approved isn't fair and isn't the intent here.
       const { data: { user: checkUser } } = await supabase.auth.getUser();
       if (checkUser) {
-        const { data: freshProfile } = await supabase.from("profiles").select("is_verified, license_verified, role").eq("id", checkUser.id).maybeSingle();
+        const { data: freshProfile } = await supabase.from("profiles").select("is_verified, license_verified, didit_status, role").eq("id", checkUser.id).maybeSingle();
         if (!freshProfile?.is_verified) {
           showAlert("Verification required", "You need to complete identity verification before going online.");
           return;
         }
-        if (freshProfile.role === "car_driver" && !freshProfile.license_verified) {
+        if (freshProfile.role === "car_driver" && freshProfile.didit_status && !freshProfile.license_verified) {
           showAlert("License review pending", "Your driver's license is still awaiting review — you'll be notified once it's approved.");
           return;
         }

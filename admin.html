@@ -2409,7 +2409,12 @@ function renderKYCCards(drivers) {
 function filterKYC() { renderKYCCards(allKYCDrivers); }
 
 async function approveDriver(id, name) {
-  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_verified: true, suspended: false, suspension_reason: null }) });
+  // Old-style manual approval reviews everything together (identity + vehicle
+  // + license as one set of documents), so it also marks the license as
+  // approved directly — this is the field the mobile app's Didit-flow gate
+  // checks separately, and it should never block someone who was just
+  // manually approved through this exact button.
+  await sb(`profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ is_verified: true, suspended: false, suspension_reason: null, license_verified: true }) });
   alert(`✅ ${name} has been approved and can now receive rides.`);
   await loadKYCDrivers();
 }
