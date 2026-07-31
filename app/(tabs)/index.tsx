@@ -544,6 +544,11 @@ export default function App() {
     });
   };
   const [showFoodHistory, setShowFoodHistory] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiChatMessages, setAiChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [aiChatInput, setAiChatInput] = useState("");
+  const [aiChatLoading, setAiChatLoading] = useState(false);
+  const [aiChatContext, setAiChatContext] = useState<{ bookingId?: string; orderId?: string } | null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [savingProfileEdit, setSavingProfileEdit] = useState(false);
@@ -1663,6 +1668,49 @@ export default function App() {
 
   const PAYSTACK_PUBLIC_KEY = "pk_test_bf1a50632c17401a944e134786ff7a9610768d13";
   const VERIFY_PAYMENT_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/verify-payment";
+  const AI_SUPPORT_CHAT_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/ai-support-chat";
+
+  // Opens the AI Support Assistant scoped to a specific ride or order — this
+  // is what lets it answer with real, specific context ("your driver is
+  // Kwame, GHS 22 fare") instead of generic canned FAQ answers.
+  const openAIChat = (context: { bookingId?: string; orderId?: string }) => {
+    setAiChatContext(context);
+    setAiChatMessages([{ role: "assistant", content: "Hi! I'm Lumina, Luma's AI assistant. Ask me anything about your ride or order — where your driver is, payment questions, anything." }]);
+    setShowAIChat(true);
+  };
+
+  const sendAISupportMessage = async () => {
+    const messageText = aiChatInput.trim();
+    if (!messageText || aiChatLoading) return;
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const newHistory = [...aiChatMessages, { role: "user" as const, content: messageText }];
+    setAiChatMessages(newHistory);
+    setAiChatInput("");
+    setAiChatLoading(true);
+
+    try {
+      const res = await fetch(AI_SUPPORT_CHAT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: u?.id,
+          role: ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role) ? "driver" : "client",
+          message: messageText,
+          bookingId: aiChatContext?.bookingId,
+          orderId: aiChatContext?.orderId,
+          // Send recent turns as context, excluding the initial greeting —
+          // keeps the AI aware of what's already been asked in this session.
+          history: newHistory.slice(1, -1).map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      setAiChatMessages(prev => [...prev, { role: "assistant", content: data.reply || "Sorry, I couldn't process that — please contact support." }]);
+    } catch (e) {
+      setAiChatMessages(prev => [...prev, { role: "assistant", content: "I'm having trouble connecting right now. Please contact human support and they'll help you directly." }]);
+    }
+    setAiChatLoading(false);
+  };
+
   const CREATE_KYC_SESSION_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/create-kyc-session";
   const PROCESS_WITHDRAWAL_URL = "https://dawdtzqgwhqchjuursjj.supabase.co/functions/v1/process-withdrawal";
 
@@ -4909,6 +4957,55 @@ export default function App() {
   // Branded confirmation modal — replaces plain native Alert.alert popups for
   // the moments that matter most (ride complete, delivery complete), since
   // those can't be restyled and look jarring against the app's dark theme.
+  // AI SUPPORT ASSISTANT — a real chat widget backed by an LLM, scoped to the
+  // person's current ride/order so answers are specific, not generic.
+  if (showAIChat) return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.nav}>
+        <TouchableOpacity onPress={() => setShowAIChat(false)}><Text style={s.navLink}>Close</Text></TouchableOpacity>
+        <Text style={s.navLogo}>✨ Lumina</Text>
+        <View />
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 16, flexGrow: 1 }}>
+        {aiChatMessages.map((m, i) => (
+          <View
+            key={i}
+            style={[
+              s.chatBubble,
+              {
+                backgroundColor: m.role === "user" ? "#2DD4BF22" : "#131C2E",
+                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "85%",
+              },
+            ]}>
+            {m.role === "assistant" && (
+              <Text style={{ color: "#2DD4BF", fontSize: 11, fontWeight: "700", marginBottom: 2 }}>✨ Lumina</Text>
+            )}
+            <Text style={{ color: "#F4F6FB" }}>{m.content}</Text>
+          </View>
+        ))}
+        {aiChatLoading && (
+          <View style={[s.chatBubble, { backgroundColor: "#131C2E", alignSelf: "flex-start" }]}>
+            <Text style={{ color: "#8A9BB8", fontSize: 13 }}>✨ Thinking...</Text>
+          </View>
+        )}
+      </ScrollView>
+      <View style={{ flexDirection: "row", gap: 8, padding: 16, borderTopWidth: 1, borderTopColor: "#1B2A44" }}>
+        <TextInput
+          style={[s.input, { flex: 1, marginBottom: 0 }]}
+          placeholder="Ask about your ride, payment, anything..."
+          placeholderTextColor="#5A6B85"
+          value={aiChatInput}
+          onChangeText={setAiChatInput}
+          onSubmitEditing={sendAISupportMessage}
+        />
+        <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={sendAISupportMessage} disabled={aiChatLoading}>
+          <Text style={s.btnTxt}>Send</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+
   if (customAlert) return (
     <SafeAreaView style={s.safe}>
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
@@ -5775,6 +5872,19 @@ export default function App() {
         <Text style={{ color: "#F4F6FB", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>Welcome, {user?.name}!</Text>
         <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 12 }}>{`Keep ${(100 - PLATFORM_SETTINGS.platform_commission * 100).toFixed(0)}% of every fare + 100% of tips`}</Text>
 
+        <TouchableOpacity
+          onPress={() => openAIChat({})}
+          style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 16 }]}>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+            <Ionicons name="sparkles" size={22} color="#2DD4BF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>Ask Lumina</Text>
+            <Text style={s.cardSub}>Your AI assistant — ask anything about rides, payouts, or your account</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
+        </TouchableOpacity>
+
         {birthdayMode && (
           <View style={{ backgroundColor: "#2a1f0a", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 12, padding: 14, marginBottom: 16 }}>
             <Text style={{ color: "#2DD4BF", fontWeight: "bold", fontSize: 15 }}>🎂 It's the founder's birthday!</Text>
@@ -5954,7 +6064,9 @@ export default function App() {
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("clientOrders")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
         <Text style={s.navLogo}>Active Ride</Text>
-        <View />
+        <TouchableOpacity onPress={() => openAIChat({ bookingId: activeBookingId || undefined })}>
+          <Ionicons name="sparkles" size={20} color="#2DD4BF" />
+        </TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={s.card}>
@@ -6308,6 +6420,19 @@ export default function App() {
             </View>
           </View>
         </Tappable>
+
+        <TouchableOpacity
+          onPress={() => openAIChat({})}
+          style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 20 }]}>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+            <Ionicons name="sparkles" size={22} color="#2DD4BF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.cardTitle}>Ask Lumina</Text>
+            <Text style={s.cardSub}>Your AI assistant — ask anything about rides, orders, or payments</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
+        </TouchableOpacity>
 
         <Text style={s.sectionTitle}>SERVICES</Text>
 
@@ -6726,7 +6851,9 @@ export default function App() {
         <View style={s.nav}>
           <TouchableOpacity onPress={() => go("myFoodOrders")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
           <Text style={s.navLogo}>Order Status</Text>
-          <View />
+          <TouchableOpacity onPress={() => openAIChat({ orderId: activeFoodOrderId || undefined })}>
+            <Ionicons name="sparkles" size={20} color="#2DD4BF" />
+          </TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 20 }}>
           <View style={s.card}>
@@ -7058,7 +7185,16 @@ export default function App() {
         {estFare && (
           <View style={s.fareBox}>
             <Text style={{ color: "#2DD4BF", fontWeight: "bold", fontSize: 16, textAlign: "center" }}>Estimated Fare</Text>
-            <Text style={{ color: "#F4F6FB", fontSize: 32, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {estFare}</Text>
+            {promoApplied && promoApplied.discount > 0 ? (
+              <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "center", marginTop: 4, gap: 8 }}>
+                <Text style={{ color: "#5A6B85", fontSize: 18, fontWeight: "600", textDecorationLine: "line-through" }}>GHS {estFare}</Text>
+                <Text style={{ color: "#2DD4BF", fontSize: 32, fontWeight: "bold" }}>
+                  {promoApplied.discount >= 100 ? "FREE" : `GHS ${calcDiscountedFare(estFare)}`}
+                </Text>
+              </View>
+            ) : (
+              <Text style={{ color: "#F4F6FB", fontSize: 32, fontWeight: "bold", textAlign: "center", marginTop: 4 }}>GHS {estFare}</Text>
+            )}
             <Text style={{ color: "#8A9BB8", textAlign: "center", marginTop: 4 }}>{estKm} km</Text>
             <View style={{ flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 6 }}>
               <Text style={{ color: getSurgeLabel(driverBookings.filter(b => b.status === "pending").length).color, fontSize: 11, fontWeight: "bold" }}>
@@ -7217,11 +7353,6 @@ export default function App() {
             <View>
               <Text style={{ color: "#2DD4BF", fontWeight: "bold" }}><Ionicons name="checkmark-circle" size={16} color="#2DD4BF" /> Promo Applied!</Text>
               <Text style={{ color: "#8A9BB8", fontSize: 12 }}>{promoApplied.label}</Text>
-              {estFare && promoApplied.discount > 0 && (
-                <Text style={{ color: "#2DD4BF", fontWeight: "bold", marginTop: 4 }}>
-                  {promoApplied.discount >= 100 ? "FREE RIDE" : `GHS ${calcDiscountedFare(estFare)} (was GHS ${estFare})`}
-                </Text>
-              )}
             </View>
             <TouchableOpacity onPress={removePromo}>
               <Text style={{ color: "#F87171", fontSize: 13 }}>Remove</Text>
@@ -7927,65 +8058,76 @@ export default function App() {
         <View style={s.nav}>
           <TouchableOpacity onPress={() => go("myBookings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
           <Text style={s.navLogo}>Track Your Driver</Text>
-          <View />
+          <TouchableOpacity onPress={() => openAIChat({ bookingId: activeBookingId || undefined })}>
+            <Ionicons name="sparkles" size={20} color="#2DD4BF" />
+          </TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 16 }}>
-          <View style={s.card}>
-            <Text style={s.cardTitle}><Ionicons name="car-sport" size={15} color="#F4F6FB" /> {activeBooking?.service === "tuktuk" ? "Tuk Tuk" : "Car"} On The Way</Text>
-            <Text style={{ color: "#8A9BB8", fontSize: 13, marginTop: 4 }}><Ionicons name="location" size={13} color="#8A9BB8" /> From: {activeBooking?.pickup}</Text>
-            <Text style={{ color: "#8A9BB8", fontSize: 13 }}><Ionicons name="flag" size={13} color="#8A9BB8" /> To: {activeBooking?.dropoff}</Text>
-            {driverEtaMinutes != null && (
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, backgroundColor: "#2DD4BF18", borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, alignSelf: "flex-start" }}>
-                <Ionicons name="time" size={16} color="#2DD4BF" />
-                <Text style={{ color: "#2DD4BF", fontWeight: "700", marginLeft: 6 }}>
-                  {driverEtaMinutes <= 1 ? "Arriving now" : `${driverEtaMinutes} min away`}
-                </Text>
-              </View>
+          <View style={[s.card, { alignItems: "center" }]}>
+            <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 4 }}>
+              {activeBooking?.status === "accepted" ? `Your ${activeBooking?.service === "tuktuk" ? "Tuk Tuk" : "driver"} is on the way` : "Finding your driver..."}
+            </Text>
+            {driverEtaMinutes != null ? (
+              <Text style={{ color: "#2DD4BF", fontSize: 36, fontWeight: "800" }}>
+                {driverEtaMinutes <= 1 ? "Arriving now" : `Arriving in ~${driverEtaMinutes} min`}
+              </Text>
+            ) : (
+              <Text style={{ color: "#F4F6FB", fontSize: 20, fontWeight: "700" }}>Waiting for live location...</Text>
             )}
+
+            {assignedDriver && (assignedDriver.vehicle_make || assignedDriver.vehicle_plate) ? (
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 14, backgroundColor: "#0B1220", borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14 }}>
+                <Ionicons name="car" size={16} color="#8A9BB8" />
+                <Text style={{ color: "#F4F6FB", fontSize: 14, marginLeft: 8, marginRight: 10 }}>
+                  {[assignedDriver.vehicle_color, assignedDriver.vehicle_make, assignedDriver.vehicle_model].filter(Boolean).join(" ") || "Vehicle"}
+                </Text>
+                {assignedDriver.vehicle_plate ? (
+                  <View style={{ backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                    <Text style={{ color: "#2DD4BF", fontSize: 13, fontWeight: "700", letterSpacing: 1 }}>{assignedDriver.vehicle_plate}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           {assignedDriver && (
-            <View style={s.card}>
-              <Text style={s.sectionTitle}>YOUR DRIVER</Text>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#2DD4BF18", alignItems: "center", justifyContent: "center", marginRight: 14, overflow: "hidden" }}>
+            <View style={[s.card, { flexDirection: "row", padding: 0, overflow: "hidden" }]}>
+              <View style={{ flex: 1, alignItems: "center", paddingVertical: 16 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF18", alignItems: "center", justifyContent: "center", overflow: "hidden", marginBottom: 6 }}>
                   {assignedDriver.profile_photo
-                    ? <Image source={{ uri: assignedDriver.profile_photo }} style={{ width: 52, height: 52 }} />
-                    : <Text style={{ color: "#2DD4BF", fontSize: 22, fontWeight: "800" }}>{(assignedDriver.full_name || "D").charAt(0).toUpperCase()}</Text>}
+                    ? <Image source={{ uri: assignedDriver.profile_photo }} style={{ width: 44, height: 44 }} />
+                    : <Text style={{ color: "#2DD4BF", fontSize: 18, fontWeight: "800" }}>{(assignedDriver.full_name || "D").charAt(0).toUpperCase()}</Text>}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: "#F4F6FB", fontSize: 16, fontWeight: "700" }}>{assignedDriver.full_name || "Your Driver"}</Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 3 }}>
-                    <Ionicons name="star" size={13} color="#F5A623" />
-                    <Text style={{ color: "#8A9BB8", fontSize: 13, marginLeft: 4 }}>{assignedDriver.average_rating ? Number(assignedDriver.average_rating).toFixed(1) : "New driver"}</Text>
-                  </View>
+                <Text style={{ color: "#F4F6FB", fontSize: 12, fontWeight: "700" }} numberOfLines={1}>{(assignedDriver.full_name || "Driver").split(" ")[0]}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 2 }}>
+                  <Ionicons name="star" size={11} color="#F5A623" />
+                  <Text style={{ color: "#8A9BB8", fontSize: 11, marginLeft: 3 }}>{assignedDriver.average_rating ? Number(assignedDriver.average_rating).toFixed(1) : "New"}</Text>
                 </View>
-                {assignedDriver.phone ? (
-                  <TouchableOpacity
-                    style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}
-                    onPress={() => Linking.openURL(`tel:${assignedDriver.phone}`)}>
-                    <Ionicons name="call" size={20} color="#04231F" />
-                  </TouchableOpacity>
-                ) : null}
               </View>
-              {assignedDriver.vehicle_photo_url && (
-                <Image source={{ uri: assignedDriver.vehicle_photo_url }} style={{ width: "100%", height: 140, borderRadius: 10, marginTop: 14 }} />
-              )}
-              {(assignedDriver.vehicle_make || assignedDriver.vehicle_plate || assignedDriver.vehicle_color) ? (
-                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: "#1B2A44" }}>
-                  <Ionicons name="car" size={16} color="#8A9BB8" />
-                  <Text style={{ color: "#F4F6FB", fontSize: 14, marginLeft: 8, flex: 1 }}>
-                    {[assignedDriver.vehicle_color, assignedDriver.vehicle_make, assignedDriver.vehicle_model].filter(Boolean).join(" ") || "Vehicle"}
-                  </Text>
-                  {assignedDriver.vehicle_plate ? (
-                    <View style={{ backgroundColor: "#0B1220", borderWidth: 1, borderColor: "#1B2A44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
-                      <Text style={{ color: "#2DD4BF", fontSize: 14, fontWeight: "700", letterSpacing: 1 }}>{assignedDriver.vehicle_plate}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
+              <View style={{ width: 1, backgroundColor: "#1B2A44" }} />
+              <TouchableOpacity
+                style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 16 }}
+                onPress={() => assignedDriver.phone ? Linking.openURL(`tel:${assignedDriver.phone}`) : showAlert("No phone on file", "This driver hasn't added a phone number yet — use in-app chat instead.")}>
+                <Ionicons name="call" size={22} color="#2DD4BF" />
+                <Text style={{ color: "#F4F6FB", fontSize: 12, fontWeight: "700", marginTop: 6 }}>Contact</Text>
+              </TouchableOpacity>
+              <View style={{ width: 1, backgroundColor: "#1B2A44" }} />
+              <TouchableOpacity
+                style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 16 }}
+                onPress={() => openFullMap(activeBooking?.pickup, "Pickup Point", "client")}>
+                <Ionicons name="map" size={22} color="#2DD4BF" />
+                <Text style={{ color: "#F4F6FB", fontSize: 12, fontWeight: "700", marginTop: 6 }}>Details</Text>
+              </TouchableOpacity>
             </View>
           )}
+
+          <View style={s.card}>
+            <Text style={{ color: "#8A9BB8", fontSize: 13 }}><Ionicons name="location" size={13} color="#8A9BB8" /> From: {activeBooking?.pickup}</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 13, marginTop: 4 }}><Ionicons name="flag" size={13} color="#8A9BB8" /> To: {activeBooking?.dropoff}</Text>
+            {assignedDriver?.vehicle_photo_url && (
+              <Image source={{ uri: assignedDriver.vehicle_photo_url }} style={{ width: "100%", height: 140, borderRadius: 10, marginTop: 12 }} />
+            )}
+          </View>
 
           <Text style={s.sectionTitle}>LIVE LOCATION</Text>
           <Tappable onPress={() => openFullMap(activeBooking?.pickup, "Pickup Point", "client")} style={{ position: "relative" }}>

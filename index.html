@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luma — Ghana's Own Super App</title>
+<meta name="description" content="Rides, delivery, and food — starting with the towns everyone else overlooked.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --ink: #0B1220;
+    --surface: #131C2E;
+    --surface2: #182339;
+    --border: #1B2A44;
+    --teal: #2DD4BF;
+    --amber: #F5A623;
+    --text: #F4F6FB;
+    --muted: #8A9BB8;
+    --dim: #5A6B85;
+    --font: 'Manrope', -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font);
+    background: var(--ink);
+    color: var(--text);
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+  a { color: inherit; text-decoration: none; }
+  img, svg { display: block; max-width: 100%; }
+  section { position: relative; }
+
+  ::selection { background: var(--teal); color: var(--ink); }
+
+  /* focus visibility */
+  a:focus-visible, button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+  /* ── LETTERMARK ── */
+  .mark { display: inline-flex; align-items: center; gap: 8px; }
+  .mark-dot { width: 15px; height: 15px; border-radius: 50%; background: var(--teal); position: relative; }
+  .mark-dot::after { content: ''; position: absolute; top: 50%; left: 100%; width: 12px; height: 2px; background: var(--dim); transform: translateY(-50%); }
+  .mark-dot2 { width: 15px; height: 15px; border-radius: 50%; background: var(--text); margin-left: 12px; }
+  .mark-word { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; }
+
+  /* ── NAV ── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(11,18,32,0.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 72px; }
+  .nav-links { display: flex; gap: 32px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  .nav-links a:hover { color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 24px; border-radius: 999px; font-weight: 700; font-size: 14px;
+    border: none; cursor: pointer; transition: transform 0.15s ease, opacity 0.15s ease;
+    font-family: var(--font);
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-teal { background: var(--teal); color: #04231F; }
+  .btn-teal:hover { opacity: 0.92; }
+  .btn-ghost { background: transparent; color: var(--text); border: 1.5px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--teal); color: var(--teal); }
+  @media (max-width: 768px) { .nav-links { display: none; } }
+
+  /* ── HERO ── */
+  .hero { padding: 88px 0 60px; overflow: hidden; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--teal); background: rgba(45,212,191,0.1); border: 1px solid rgba(45,212,191,0.25);
+    padding: 7px 14px; border-radius: 999px; margin-bottom: 24px; letter-spacing: 0.02em;
+  }
+  .eyebrow-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); animation: blink 2s ease-in-out infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  h1 {
+    font-size: clamp(38px, 5.4vw, 64px); font-weight: 800; line-height: 1.04;
+    letter-spacing: -0.03em; margin-bottom: 22px;
+  }
+  h1 .accent { color: var(--teal); }
+  .hero-sub {
+    font-size: 18px; color: var(--muted); max-width: 480px; margin-bottom: 32px; line-height: 1.6;
+  }
+  .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+
+  .trust-row { display: flex; gap: 28px; flex-wrap: wrap; }
+  .trust-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); font-weight: 600; }
+  .trust-item svg { flex-shrink: 0; }
+
+  /* ── PHONE MOCKUP (real app UI recreation) ── */
+  .phone-stage { display: flex; justify-content: center; position: relative; }
+  .phone {
+    width: 300px; background: var(--ink); border-radius: 40px; border: 8px solid #060a13;
+    box-shadow: 0 40px 80px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+    overflow: hidden; position: relative;
+    animation: float 5s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+  .phone-notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 90px; height: 22px; background: #060a13; border-radius: 0 0 14px 14px; z-index: 5; }
+  .phone-screen { padding: 36px 16px 20px; }
+  .p-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .p-mark { display: flex; align-items: center; gap: 5px; }
+  .p-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
+  .p-dot2 { width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-left: 6px; }
+  .p-word { font-weight: 800; font-size: 13px; }
+  .p-avatar { width: 24px; height: 24px; border-radius: 50%; background: rgba(45,212,191,0.15); border: 1.5px solid var(--teal); }
+  .p-greet { font-size: 15px; font-weight: 800; margin-bottom: 2px; }
+  .p-greet-sub { font-size: 10px; color: var(--muted); margin-bottom: 12px; }
+  .p-map {
+    height: 108px; border-radius: 14px; margin-bottom: 12px; position: relative; overflow: hidden;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(45,212,191,0.12), transparent 55%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 16px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 16px),
+      var(--surface);
+  }
+  .p-pin { position: absolute; top: 40%; left: 46%; width: 20px; height: 24px; }
+  .p-map-label {
+    position: absolute; bottom: 0; left: 0; right: 0; background: rgba(11,18,32,0.9);
+    font-size: 9px; padding: 7px 10px; color: var(--text); font-weight: 700;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .p-services-title { font-size: 9px; font-weight: 700; color: var(--dim); letter-spacing: 0.08em; margin-bottom: 8px; }
+  .p-hero-tile {
+    border: 1.5px solid var(--teal); border-radius: 12px; padding: 12px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 10px; background: rgba(45,212,191,0.05);
+  }
+  .p-icon { width: 30px; height: 30px; border-radius: 15px; background: rgba(45,212,191,0.18); flex-shrink: 0; }
+  .p-tile-title { font-size: 11px; font-weight: 800; }
+  .p-tile-sub { font-size: 8.5px; color: var(--muted); margin-top: 1px; }
+  .p-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .p-tile2 { background: var(--surface); border-radius: 12px; padding: 10px; }
+  .p-icon-sm { width: 22px; height: 22px; border-radius: 11px; margin-bottom: 8px; }
+
+  .phone-glow {
+    position: absolute; width: 340px; height: 340px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(45,212,191,0.18), transparent 70%);
+    top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: -1;
+  }
+
+  /* ── SECTION HEADERS ── */
+  .section-pad { padding: 100px 0; }
+  .section-head { max-width: 620px; margin-bottom: 56px; }
+  .section-eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--amber); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 14px; }
+  h2 { font-size: clamp(28px, 3.4vw, 42px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 16px; }
+  .section-desc { color: var(--muted); font-size: 16px; line-height: 1.65; }
+
+  /* ── SPLIT: RIDERS / DRIVERS (signature layout) ── */
+  .split { display: grid; grid-template-columns: 1fr 1fr; border-radius: 24px; overflow: hidden; border: 1px solid var(--border); }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+  .split-panel { padding: 56px 44px; position: relative; }
+  .split-panel.riders { background: linear-gradient(160deg, rgba(45,212,191,0.1), transparent 60%), var(--surface); border-right: 1px solid var(--border); }
+  .split-panel.drivers { background: linear-gradient(160deg, rgba(245,166,35,0.1), transparent 60%), var(--surface); }
+  @media (max-width: 860px) { .split-panel.riders { border-right: none; border-bottom: 1px solid var(--border); } }
+  .split-tag { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; margin-bottom: 18px; display: block; }
+  .split-panel.riders .split-tag { color: var(--teal); }
+  .split-panel.drivers .split-tag { color: var(--amber); }
+  .split-panel h3 { font-size: 26px; font-weight: 800; margin-bottom: 14px; letter-spacing: -0.02em; }
+  .split-panel p { color: var(--muted); font-size: 15px; line-height: 1.65; margin-bottom: 28px; }
+  .split-list { list-style: none; margin-bottom: 32px; }
+  .split-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--text); margin-bottom: 12px; }
+  .split-list svg { flex-shrink: 0; margin-top: 2px; }
+
+  /* ── SERVICES ── */
+  .services-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .services-grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 520px) { .services-grid { grid-template-columns: 1fr; } }
+  .service-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+    padding: 26px 22px; transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .service-card:hover { border-color: var(--teal); transform: translateY(-3px); }
+  .service-icon { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 18px; }
+  .service-card h4 { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
+  .service-card p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  /* ── COVERAGE / MISSION ── */
+  .coverage { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .coverage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+  @media (max-width: 860px) { .coverage-grid { grid-template-columns: 1fr; gap: 40px; } }
+  .coverage-visual {
+    background: var(--ink); border: 1px solid var(--border); border-radius: 20px; padding: 32px;
+  }
+  .coverage-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .coverage-row:last-child { border-bottom: none; }
+  .coverage-city { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 15px; }
+  .city-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .coverage-status { font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 5px 12px; border-radius: 999px; }
+  .status-served { color: var(--dim); background: rgba(138,155,184,0.1); }
+  .status-luma { color: var(--teal); background: rgba(45,212,191,0.14); border: 1px solid rgba(45,212,191,0.35); }
+  .status-luma .city-dot { animation: blink 1.8s ease-in-out infinite; }
+
+  /* ── FOUNDER ── */
+  .founder { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 56px; align-items: center; }
+  @media (max-width: 860px) { .founder { grid-template-columns: 1fr; gap: 36px; } }
+  .founder-photo {
+    aspect-ratio: 1; border-radius: 24px; background: linear-gradient(150deg, var(--surface), var(--surface2));
+    border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .founder-photo::before {
+    content: ''; position: absolute; width: 260px; height: 260px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(45,212,191,0.16), transparent 70%);
+  }
+  .founder-initial { font-size: 96px; font-weight: 800; color: var(--teal); opacity: 0.9; z-index: 1; }
+  .founder blockquote { font-size: 22px; font-weight: 700; line-height: 1.5; margin-bottom: 24px; letter-spacing: -0.01em; }
+  .founder-name { font-weight: 800; font-size: 16px; }
+  .founder-role { color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+  /* ── CTA ── */
+  .cta-band {
+    background: linear-gradient(135deg, rgba(45,212,191,0.12), rgba(245,166,35,0.06)), var(--surface);
+    border: 1px solid var(--border); border-radius: 28px; padding: 64px 48px; text-align: center;
+  }
+  @media (max-width: 600px) { .cta-band { padding: 44px 24px; } }
+  .cta-band h2 { margin-bottom: 12px; }
+  .cta-band .section-desc { max-width: 480px; margin: 0 auto 32px; }
+  .waitlist-form { display: flex; gap: 10px; max-width: 420px; margin: 0 auto; flex-wrap: wrap; justify-content: center; }
+  .waitlist-input {
+    flex: 1; min-width: 220px; background: var(--ink); border: 1.5px solid var(--border); color: var(--text);
+    padding: 13px 18px; border-radius: 999px; font-size: 14px; font-family: var(--font); outline: none;
+  }
+  .waitlist-input:focus { border-color: var(--teal); }
+  .waitlist-note { font-size: 12px; color: var(--dim); margin-top: 14px; }
+  .form-success { color: var(--teal); font-weight: 700; font-size: 14px; display: none; }
+
+  /* ── FOOTER ── */
+  footer { border-top: 1px solid var(--border); padding: 48px 0 32px; }
+  .footer-grid { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 24px; margin-bottom: 32px; }
+  .footer-tag { color: var(--dim); font-size: 13px; margin-top: 10px; max-width: 260px; line-height: 1.6; }
+  .footer-links { display: flex; gap: 40px; flex-wrap: wrap; }
+  .footer-col h5 { font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
+  .footer-col a { display: block; font-size: 14px; color: var(--muted); margin-bottom: 10px; }
+  .footer-col a:hover { color: var(--teal); }
+  .footer-bottom { border-top: 1px solid var(--border); padding-top: 24px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--dim); }
+
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <div class="mark"><div class="mark-dot"></div><div class="mark-dot2"></div><span class="mark-word">Luma</span></div>
+    <div class="nav-links">
+      <a href="#riders">Riders</a>
+      <a href="#drivers">Drivers</a>
+      <a href="#services">Services</a>
+      <a href="#founder">About</a>
+    </div>
+    <a href="#waitlist" class="btn btn-teal">Get Early Access</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow"><span class="eyebrow-dot"></span> Now expanding beyond Accra &amp; Kumasi</div>
+      <h1>Ghana's own <span class="accent">super app</span> — built for the towns everyone else skipped.</h1>
+      <p class="hero-sub">Rides, motorbike delivery, and food — Uber and Bolt cover Accra and Kumasi. Luma is starting where they didn't.</p>
+      <div class="hero-ctas">
+        <a href="#waitlist" class="btn btn-teal">Join the Waitlist</a>
+        <a href="#drivers" class="btn btn-ghost">Drive with Luma</a>
+      </div>
+      <div class="trust-row">
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Cash, MoMo, or Card
+        </div>
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          SOS safety on every ride
+        </div>
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Verified drivers only
+        </div>
+      </div>
+    </div>
+
+    <div class="phone-stage">
+      <div class="phone-glow"></div>
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="p-nav">
+            <div class="p-mark"><div class="p-dot"></div><div class="p-dot2"></div><span class="p-word">Luma</span></div>
+            <div class="p-avatar"></div>
+          </div>
+          <div class="p-greet">Hello, Ama! 👋</div>
+          <div class="p-greet-sub">Where are you going today?</div>
+          <div class="p-map">
+            <svg class="p-pin" viewBox="0 0 20 24" fill="none"><path d="M10 0C4.5 0 0 4.5 0 10c0 7.5 10 14 10 14s10-6.5 10-14C20 4.5 15.5 0 10 0z" fill="#2DD4BF"/><circle cx="10" cy="10" r="3.5" fill="#0B1220"/></svg>
+            <div class="p-map-label"><span>Tap to book a ride</span><span style="color:#2DD4BF">→</span></div>
+          </div>
+          <div class="p-services-title">SERVICES</div>
+          <div class="p-hero-tile">
+            <div class="p-icon"></div>
+            <div>
+              <div class="p-tile-title">Car Ride</div>
+              <div class="p-tile-sub">Point-to-point — your fastest option</div>
+            </div>
+          </div>
+          <div class="p-grid2">
+            <div class="p-tile2"><div class="p-icon-sm" style="background:rgba(245,166,35,0.2)"></div><div class="p-tile-title">Tuk Tuk</div><div class="p-tile-sub">Short trips</div></div>
+            <div class="p-tile2"><div class="p-icon-sm" style="background:rgba(255,87,34,0.2)"></div><div class="p-tile-title">Send Parcel</div><div class="p-tile-sub">Fast delivery</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-pad" id="split">
+  <div class="wrap">
+    <div class="split reveal">
+      <div class="split-panel riders" id="riders">
+        <span class="split-tag">FOR RIDERS</span>
+        <h3>Book a ride your town has never had before.</h3>
+        <p>No more waiting at the trotro station wondering if a car is coming. Set your pickup, see your fare upfront, and track your driver the whole way.</p>
+        <ul class="split-list">
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> See your fare before you book — no surprises</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Track your driver live, right to your door</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Pay however you already pay — cash, MoMo, or card</li>
+        </ul>
+        <a href="#waitlist" class="btn btn-teal">Get Early Access</a>
+      </div>
+      <div class="split-panel drivers" id="drivers">
+        <span class="split-tag">FOR DRIVERS</span>
+        <h3>Keep more of what you earn, every single ride.</h3>
+        <p>Own a car, tuk tuk, or motorbike? Turn it into steady income — set your own hours, get paid weekly, and keep 100% of every tip.</p>
+        <ul class="split-list">
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#F5A623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Keep 85% of every fare, no hidden fees</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#F5A623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Monthly top-driver awards, up to GHS 100</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#F5A623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Verified once with a quick selfie — driving in minutes</li>
+        </ul>
+        <a href="#waitlist" class="btn btn-ghost">Sign Up to Drive</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-pad" id="services">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-eyebrow">What we offer</div>
+      <h2>One app for getting there, and getting things there.</h2>
+      <p class="section-desc">Rides for people, riders for parcels, and food from the spots you already know — all in one place.</p>
+    </div>
+    <div class="services-grid reveal">
+      <div class="service-card">
+        <div class="service-icon" style="background:rgba(45,212,191,0.15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 17h14M5 17a2 2 0 100 4 2 2 0 000-4zm14 0a2 2 0 100 4 2 2 0 000-4zM5 17l1.5-8h11L19 17M6.5 9L8 4h8l1.5 5" stroke="#2DD4BF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h4>Car Rides</h4>
+        <p>Point-to-point, your fastest way across town.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon" style="background:rgba(245,166,35,0.15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="9" width="14" height="8" rx="2" stroke="#F5A623" stroke-width="1.6"/><circle cx="8" cy="19" r="1.6" fill="#F5A623"/><circle cx="16" cy="19" r="1.6" fill="#F5A623"/></svg>
+        </div>
+        <h4>Tuk Tuk</h4>
+        <p>Affordable short trips around your neighbourhood.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon" style="background:rgba(255,87,34,0.15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="17" r="3" stroke="#ff5722" stroke-width="1.6"/><circle cx="18" cy="17" r="3" stroke="#ff5722" stroke-width="1.6"/><path d="M6 17l4-8h5l3 8M10 9h3" stroke="#ff5722" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </div>
+        <h4>Send a Parcel</h4>
+        <p>Motorbike delivery for documents, gifts, anything.</p>
+      </div>
+      <div class="service-card">
+        <div class="service-icon" style="background:rgba(45,212,191,0.15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 9h14l-1.5 9a2 2 0 01-2 1.7H8.5a2 2 0 01-2-1.7L5 9z" stroke="#2DD4BF" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 9V6a3 3 0 016 0v3" stroke="#2DD4BF" stroke-width="1.6"/></svg>
+        </div>
+        <h4>Food Delivery</h4>
+        <p>From restaurants near you, straight to your door.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="coverage">
+  <div class="wrap section-pad">
+    <div class="coverage-grid">
+      <div class="reveal">
+        <div class="section-eyebrow">Why we exist</div>
+        <h2>Every ride-hailing app in Ghana serves the same two cities.</h2>
+        <p class="section-desc" style="margin-bottom: 20px;">Millions of people outside Accra and Kumasi still rely on waiting at trotro stations, hoping a driver shows up. Luma exists to bring reliable rides to every town — not just the biggest two.</p>
+        <p class="section-desc">Underserved towns aren't a test market to us. They're the whole plan.</p>
+      </div>
+      <div class="coverage-visual reveal">
+        <div class="coverage-row">
+          <div class="coverage-city"><div class="city-dot" style="background:#5A6B85"></div>Accra</div>
+          <div class="coverage-status status-served">Already served</div>
+        </div>
+        <div class="coverage-row">
+          <div class="coverage-city"><div class="city-dot" style="background:#5A6B85"></div>Kumasi</div>
+          <div class="coverage-status status-served">Already served</div>
+        </div>
+        <div class="coverage-row">
+          <div class="coverage-city"><div class="city-dot" style="background:#2DD4BF"></div>Towns beyond the big two</div>
+          <div class="coverage-status status-luma">Where Luma starts</div>
+        </div>
+        <div class="coverage-row">
+          <div class="coverage-city"><div class="city-dot" style="background:#2DD4BF"></div>Your town, next</div>
+          <div class="coverage-status status-luma">Tell us where</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-pad" id="founder">
+  <div class="wrap">
+    <div class="founder reveal">
+      <div class="founder-photo">
+        <svg width="120" height="60" viewBox="0 0 120 60" style="position:relative;z-index:1;">
+          <circle cx="30" cy="30" r="16" fill="#2DD4BF"/>
+          <line x1="46" y1="30" x2="74" y2="30" stroke="#5A6B85" stroke-width="2"/>
+          <circle cx="90" cy="30" r="16" fill="#F4F6FB"/>
+        </svg>
+      </div>
+      <div>
+        <div class="section-eyebrow">Started in Ghana. Built to grow.</div>
+        <blockquote>"We got tired of waiting for a trotro that might not come. So we built the app we wished existed — starting with the towns everyone else overlooked."</blockquote>
+        <div class="founder-name">The Luma Team</div>
+        <div class="founder-role">Started in Ghana — built to go further</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-pad" id="waitlist">
+  <div class="wrap">
+    <div class="cta-band reveal">
+      <div class="section-eyebrow" style="text-align:center">Coming soon</div>
+      <h2>Be first to ride when we launch.</h2>
+      <p class="section-desc">Drop your email — we'll let you know the moment Luma is live in your town, whether you want to ride or drive.</p>
+      <form class="waitlist-form" id="waitlist-form">
+        <input type="email" class="waitlist-input" placeholder="you@email.com" required id="waitlist-email">
+        <button type="submit" class="btn btn-teal">Notify Me</button>
+      </form>
+      <div class="form-success" id="form-success">You're on the list — we'll be in touch soon! 🎉</div>
+      <div class="waitlist-note">No spam. Just one email when we launch.</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <div class="mark"><div class="mark-dot"></div><div class="mark-dot2"></div><span class="mark-word">Luma</span></div>
+        <p class="footer-tag">Ghana's own super app — rides, delivery, and food for every town, not just the big two.</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h5>Product</h5>
+          <a href="#riders">For Riders</a>
+          <a href="#drivers">For Drivers</a>
+          <a href="#services">Services</a>
+        </div>
+        <div class="footer-col">
+          <h5>Company</h5>
+          <a href="#founder">About</a>
+          <a href="mailto:luminalinks43@gmail.com">Contact</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Luma. Started in Ghana.</span>
+      <span>luminalinks43@gmail.com</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Scroll-reveal — one orchestrated pass, not scattered effects
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // Waitlist form — saves to the same Supabase project the app runs on, so
+  // signups are actually visible to the team, not lost in a visitor's own
+  // browser storage.
+  const SUPABASE_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhd2R0enFnd2hxY2hqdXVyc2pqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1ODE2MzAsImV4cCI6MjA5MjE1NzYzMH0.IFukRWG6r6oLRT4HdLBHVCk2q-kjtcXRB47ZxbXG1Zs';
+
+  document.getElementById('waitlist-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const email = document.getElementById('waitlist-email').value.trim();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify({ email, source: 'landing_page' }),
+      });
+      if (!res.ok && res.status !== 409) {
+        // 409 = duplicate email (unique constraint) — still treat as success,
+        // since the person IS already on the list, which is what they wanted.
+        throw new Error('Failed to save');
+      }
+      document.getElementById('waitlist-form').style.display = 'none';
+      document.getElementById('form-success').style.display = 'block';
+    } catch (err) {
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+      alert("Something went wrong saving your email — please try again in a moment.");
+    }
+  });
+</script>
+
+</body>
+</html>
