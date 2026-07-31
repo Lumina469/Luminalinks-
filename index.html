@@ -243,6 +243,13 @@
   .waitlist-input:focus { border-color: var(--teal); }
   .waitlist-note { font-size: 12px; color: var(--dim); margin-top: 14px; }
   .form-success { color: var(--teal); font-weight: 700; font-size: 14px; display: none; }
+  .intent-toggle { display: flex; gap: 8px; justify-content: center; margin: 24px 0 20px; }
+  .intent-btn {
+    padding: 10px 20px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: var(--ink); border: 1.5px solid var(--border); color: var(--muted);
+    cursor: pointer; font-family: var(--font); transition: all 0.15s ease;
+  }
+  .intent-btn.active { background: var(--teal); border-color: var(--teal); color: #04231F; }
 
   /* ── FOOTER ── */
   footer { border-top: 1px solid var(--border); padding: 48px 0 32px; }
@@ -457,7 +464,11 @@
     <div class="cta-band reveal">
       <div class="section-eyebrow" style="text-align:center">Coming soon</div>
       <h2>Be first to ride when we launch.</h2>
-      <p class="section-desc">Drop your email — we'll let you know the moment Luma is live in your town, whether you want to ride or drive.</p>
+      <p class="section-desc">Drop your email — we'll let you know the moment Luma is live in your town.</p>
+      <div class="intent-toggle" id="intent-toggle">
+        <button type="button" class="intent-btn active" data-intent="rider">I want to ride</button>
+        <button type="button" class="intent-btn" data-intent="driver">I want to drive</button>
+      </div>
       <form class="waitlist-form" id="waitlist-form">
         <input type="email" class="waitlist-input" placeholder="you@email.com" required id="waitlist-email">
         <button type="submit" class="btn btn-teal">Notify Me</button>
@@ -503,6 +514,24 @@
   }, { threshold: 0.12 });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
+  // Rider/driver intent toggle — defaults to "rider", but any "drive"-labeled
+  // CTA on the page pre-selects "driver" before scrolling down, so the form
+  // reflects what the person actually clicked instead of guessing.
+  let selectedIntent = 'rider';
+  document.querySelectorAll('.intent-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedIntent = btn.dataset.intent;
+      document.querySelectorAll('.intent-btn').forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+  document.querySelectorAll('a[href="#waitlist"]').forEach(link => {
+    link.addEventListener('click', () => {
+      const wantsDriver = /drive/i.test(link.textContent);
+      selectedIntent = wantsDriver ? 'driver' : 'rider';
+      document.querySelectorAll('.intent-btn').forEach(b => b.classList.toggle('active', b.dataset.intent === selectedIntent));
+    });
+  });
+
   // Waitlist form — saves to the same Supabase project the app runs on, so
   // signups are actually visible to the team, not lost in a visitor's own
   // browser storage.
@@ -526,7 +555,7 @@
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal',
         },
-        body: JSON.stringify({ email, source: 'landing_page' }),
+        body: JSON.stringify({ email, source: 'landing_page', interested_as: selectedIntent }),
       });
       if (!res.ok && res.status !== 409) {
         // 409 = duplicate email (unique constraint) — still treat as success,
@@ -534,6 +563,7 @@
         throw new Error('Failed to save');
       }
       document.getElementById('waitlist-form').style.display = 'none';
+      document.getElementById('intent-toggle').style.display = 'none';
       document.getElementById('form-success').style.display = 'block';
     } catch (err) {
       submitBtn.textContent = originalText;
