@@ -37,27 +37,22 @@
   section { position: relative; }
 
   ::selection { background: var(--teal); color: var(--ink); }
-
-  /* focus visibility */
   a:focus-visible, button:focus-visible, input:focus-visible {
     outline: 2px solid var(--teal);
     outline-offset: 3px;
   }
-
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
   }
 
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
 
-  /* ── LETTERMARK ── */
   .mark { display: inline-flex; align-items: center; gap: 8px; }
   .mark-dot { width: 15px; height: 15px; border-radius: 50%; background: var(--teal); position: relative; }
   .mark-dot::after { content: ''; position: absolute; top: 50%; left: 100%; width: 12px; height: 2px; background: var(--dim); transform: translateY(-50%); }
   .mark-dot2 { width: 15px; height: 15px; border-radius: 50%; background: var(--text); margin-left: 12px; }
   .mark-word { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; }
 
-  /* ── NAV ── */
   nav {
     position: sticky; top: 0; z-index: 100;
     background: rgba(11,18,32,0.85); backdrop-filter: blur(12px);
@@ -79,7 +74,6 @@
   .btn-ghost:hover { border-color: var(--teal); color: var(--teal); }
   @media (max-width: 768px) { .nav-links { display: none; } }
 
-  /* ── HERO ── */
   .hero { padding: 88px 0 60px; overflow: hidden; }
   .hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
   @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
@@ -107,7 +101,6 @@
   .trust-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); font-weight: 600; }
   .trust-item svg { flex-shrink: 0; }
 
-  /* ── PHONE MOCKUP (real app UI recreation) ── */
   .phone-stage { display: flex; justify-content: center; position: relative; }
   .phone {
     width: 300px; background: var(--ink); border-radius: 40px; border: 8px solid #060a13;
@@ -158,14 +151,12 @@
     top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: -1;
   }
 
-  /* ── SECTION HEADERS ── */
   .section-pad { padding: 100px 0; }
   .section-head { max-width: 620px; margin-bottom: 56px; }
   .section-eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--amber); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 14px; }
   h2 { font-size: clamp(28px, 3.4vw, 42px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 16px; }
   .section-desc { color: var(--muted); font-size: 16px; line-height: 1.65; }
 
-  /* ── SPLIT: RIDERS / DRIVERS (signature layout) ── */
   .split { display: grid; grid-template-columns: 1fr 1fr; border-radius: 24px; overflow: hidden; border: 1px solid var(--border); }
   @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
   .split-panel { padding: 56px 44px; position: relative; }
@@ -181,7 +172,6 @@
   .split-list li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--text); margin-bottom: 12px; }
   .split-list svg { flex-shrink: 0; margin-top: 2px; }
 
-  /* ── SERVICES ── */
   .services-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
   @media (max-width: 900px) { .services-grid { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 520px) { .services-grid { grid-template-columns: 1fr; } }
@@ -191,16 +181,14 @@
   }
   .service-card:hover { border-color: var(--teal); transform: translateY(-3px); }
   .service-icon { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 18px; }
+  .service-illustration { width: 100%; height: 92px; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; background: var(--ink); border-radius: 14px; border: 1px solid var(--border); }
   .service-card h4 { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
   .service-card p { font-size: 13px; color: var(--muted); line-height: 1.5; }
 
-  /* ── COVERAGE / MISSION ── */
   .coverage { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
   .coverage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
   @media (max-width: 860px) { .coverage-grid { grid-template-columns: 1fr; gap: 40px; } }
-  .coverage-visual {
-    background: var(--ink); border: 1px solid var(--border); border-radius: 20px; padding: 32px;
-  }
+  .coverage-visual { background: var(--ink); border: 1px solid var(--border); border-radius: 20px; padding: 32px; }
   .coverage-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
   .coverage-row:last-child { border-bottom: none; }
   .coverage-city { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 15px; }
@@ -210,7 +198,6 @@
   .status-luma { color: var(--teal); background: rgba(45,212,191,0.14); border: 1px solid rgba(45,212,191,0.35); }
   .status-luma .city-dot { animation: blink 1.8s ease-in-out infinite; }
 
-  /* ── FOUNDER ── */
   .founder { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 56px; align-items: center; }
   @media (max-width: 860px) { .founder { grid-template-columns: 1fr; gap: 36px; } }
   .founder-photo {
@@ -222,19 +209,24 @@
     content: ''; position: absolute; width: 260px; height: 260px; border-radius: 50%;
     background: radial-gradient(circle, rgba(45,212,191,0.16), transparent 70%);
   }
-  .founder-initial { font-size: 96px; font-weight: 800; color: var(--teal); opacity: 0.9; z-index: 1; }
   .founder blockquote { font-size: 22px; font-weight: 700; line-height: 1.5; margin-bottom: 24px; letter-spacing: -0.01em; }
   .founder-name { font-weight: 800; font-size: 16px; }
   .founder-role { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
-  /* ── CTA ── */
   .cta-band {
     background: linear-gradient(135deg, rgba(45,212,191,0.12), rgba(245,166,35,0.06)), var(--surface);
     border: 1px solid var(--border); border-radius: 28px; padding: 64px 48px; text-align: center;
   }
   @media (max-width: 600px) { .cta-band { padding: 44px 24px; } }
   .cta-band h2 { margin-bottom: 12px; }
-  .cta-band .section-desc { max-width: 480px; margin: 0 auto 32px; }
+  .cta-band .section-desc { max-width: 480px; margin: 0 auto 24px; }
+  .intent-toggle { display: flex; gap: 8px; justify-content: center; margin: 0 0 20px; }
+  .intent-btn {
+    padding: 10px 20px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: var(--ink); border: 1.5px solid var(--border); color: var(--muted);
+    cursor: pointer; font-family: var(--font); transition: all 0.15s ease;
+  }
+  .intent-btn.active { background: var(--teal); border-color: var(--teal); color: #04231F; }
   .waitlist-form { display: flex; gap: 10px; max-width: 420px; margin: 0 auto; flex-wrap: wrap; justify-content: center; }
   .waitlist-input {
     flex: 1; min-width: 220px; background: var(--ink); border: 1.5px solid var(--border); color: var(--text);
@@ -243,15 +235,7 @@
   .waitlist-input:focus { border-color: var(--teal); }
   .waitlist-note { font-size: 12px; color: var(--dim); margin-top: 14px; }
   .form-success { color: var(--teal); font-weight: 700; font-size: 14px; display: none; }
-  .intent-toggle { display: flex; gap: 8px; justify-content: center; margin: 24px 0 20px; }
-  .intent-btn {
-    padding: 10px 20px; border-radius: 999px; font-size: 13px; font-weight: 700;
-    background: var(--ink); border: 1.5px solid var(--border); color: var(--muted);
-    cursor: pointer; font-family: var(--font); transition: all 0.15s ease;
-  }
-  .intent-btn.active { background: var(--teal); border-color: var(--teal); color: #04231F; }
 
-  /* ── FOOTER ── */
   footer { border-top: 1px solid var(--border); padding: 48px 0 32px; }
   .footer-grid { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 24px; margin-bottom: 32px; }
   .footer-tag { color: var(--dim); font-size: 13px; margin-top: 10px; max-width: 260px; line-height: 1.6; }
@@ -377,29 +361,53 @@
     </div>
     <div class="services-grid reveal">
       <div class="service-card">
-        <div class="service-icon" style="background:rgba(45,212,191,0.15)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 17h14M5 17a2 2 0 100 4 2 2 0 000-4zm14 0a2 2 0 100 4 2 2 0 000-4zM5 17l1.5-8h11L19 17M6.5 9L8 4h8l1.5 5" stroke="#2DD4BF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="service-illustration">
+          <svg width="84" height="60" viewBox="0 0 84 60">
+            <defs>
+              <linearGradient id="carBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F4F6FB"/><stop offset="100%" stop-color="#C7D0DE"/></linearGradient>
+              <linearGradient id="carGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0F2A29"/><stop offset="100%" stop-color="#1A4542"/></linearGradient>
+            </defs>
+            <ellipse cx="42" cy="52" rx="30" ry="4" fill="#000" opacity="0.35"/>
+            <path d="M10 40c0-3 2-5 5-6l6-10c2-3 5-5 9-5h20c4 0 7 2 9 5l6 10c3 1 5 3 5 6v6c0 2-2 4-4 4h-2c-1 3-3 5-6 5s-5-2-6-5H28c-1 3-3 5-6 5s-5-2-6-5h-2c-2 0-4-2-4-4v-6z" fill="url(#carBody)"/>
+            <path d="M23 24l4-7c1-2 3-3 5-3h20c2 0 4 1 5 3l4 7z" fill="url(#carGlass)"/>
+            <line x1="42" y1="19" x2="42" y2="24" stroke="#0B1220" stroke-width="1.5"/>
+            <circle cx="24" cy="44" r="6" fill="#1B2A44"/><circle cx="24" cy="44" r="2.4" fill="#8A9BB8"/>
+            <circle cx="60" cy="44" r="6" fill="#1B2A44"/><circle cx="60" cy="44" r="2.4" fill="#8A9BB8"/>
+            <rect x="10" y="30" width="6" height="3" rx="1.5" fill="#2DD4BF"/>
+          </svg>
         </div>
         <h4>Car Rides</h4>
         <p>Point-to-point, your fastest way across town.</p>
       </div>
       <div class="service-card">
-        <div class="service-icon" style="background:rgba(245,166,35,0.15)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="9" width="14" height="8" rx="2" stroke="#F5A623" stroke-width="1.6"/><circle cx="8" cy="19" r="1.6" fill="#F5A623"/><circle cx="16" cy="19" r="1.6" fill="#F5A623"/></svg>
+        <div class="service-illustration">
+          <img src="tuktuk-icon.png" alt="Tuk Tuk" style="width:88px;height:auto;object-fit:contain;">
         </div>
         <h4>Tuk Tuk</h4>
         <p>Affordable short trips around your neighbourhood.</p>
       </div>
       <div class="service-card">
-        <div class="service-icon" style="background:rgba(255,87,34,0.15)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="17" r="3" stroke="#ff5722" stroke-width="1.6"/><circle cx="18" cy="17" r="3" stroke="#ff5722" stroke-width="1.6"/><path d="M6 17l4-8h5l3 8M10 9h3" stroke="#ff5722" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <div class="service-illustration">
+          <img src="delivery-icon.png" alt="Motorbike delivery" style="width:88px;height:auto;object-fit:contain;">
         </div>
         <h4>Send a Parcel</h4>
         <p>Motorbike delivery for documents, gifts, anything.</p>
       </div>
       <div class="service-card">
-        <div class="service-icon" style="background:rgba(45,212,191,0.15)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 9h14l-1.5 9a2 2 0 01-2 1.7H8.5a2 2 0 01-2-1.7L5 9z" stroke="#2DD4BF" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 9V6a3 3 0 016 0v3" stroke="#2DD4BF" stroke-width="1.6"/></svg>
+        <div class="service-illustration">
+          <svg width="76" height="60" viewBox="0 0 76 60">
+            <defs>
+              <linearGradient id="bunTop" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#F0B267"/><stop offset="100%" stop-color="#D4924B"/></linearGradient>
+              <linearGradient id="bunBottom" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E0A25C"/><stop offset="100%" stop-color="#C4813E"/></linearGradient>
+            </defs>
+            <ellipse cx="38" cy="52" rx="26" ry="4" fill="#000" opacity="0.35"/>
+            <path d="M14 26c0-8 11-14 24-14s24 6 24 14z" fill="url(#bunTop)"/>
+            <circle cx="24" cy="16" r="1.3" fill="#fff"/><circle cx="34" cy="12" r="1.3" fill="#fff"/><circle cx="44" cy="14" r="1.3" fill="#fff"/><circle cx="52" cy="18" r="1.3" fill="#fff"/>
+            <rect x="13" y="26" width="50" height="5" rx="2.5" fill="#7CB342"/>
+            <rect x="14" y="31" width="48" height="6" rx="2" fill="#F5D142"/>
+            <rect x="13" y="37" width="50" height="7" rx="3" fill="#8B5E3C"/>
+            <path d="M13 44h50c0 5-11 9-25 9s-25-4-25-9z" fill="url(#bunBottom)"/>
+          </svg>
         </div>
         <h4>Food Delivery</h4>
         <p>From restaurants near you, straight to your door.</p>
@@ -504,19 +512,18 @@
       <span>© 2026 Luma. Started in Ghana.</span>
       <span>luminalinks43@gmail.com</span>
     </div>
+    <div style="text-align:center;margin-top:12px;font-size:11px;color:var(--dim);">
+      Delivery illustration by <a href="https://www.freepik.com" target="_blank" style="color:var(--dim);text-decoration:underline;">Freepik</a>
+    </div>
   </div>
 </footer>
 
 <script>
-  // Scroll-reveal — one orchestrated pass, not scattered effects
   const io = new IntersectionObserver((entries) => {
     entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); });
   }, { threshold: 0.12 });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 
-  // Rider/driver intent toggle — defaults to "rider", but any "drive"-labeled
-  // CTA on the page pre-selects "driver" before scrolling down, so the form
-  // reflects what the person actually clicked instead of guessing.
   let selectedIntent = 'rider';
   document.querySelectorAll('.intent-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -532,9 +539,6 @@
     });
   });
 
-  // Waitlist form — saves to the same Supabase project the app runs on, so
-  // signups are actually visible to the team, not lost in a visitor's own
-  // browser storage.
   const SUPABASE_URL = 'https://dawdtzqgwhqchjuursjj.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhd2R0enFnd2hxY2hqdXVyc2pqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1ODE2MzAsImV4cCI6MjA5MjE1NzYzMH0.IFukRWG6r6oLRT4HdLBHVCk2q-kjtcXRB47ZxbXG1Zs';
 
@@ -558,8 +562,6 @@
         body: JSON.stringify({ email, source: 'landing_page', interested_as: selectedIntent }),
       });
       if (!res.ok && res.status !== 409) {
-        // 409 = duplicate email (unique constraint) — still treat as success,
-        // since the person IS already on the list, which is what they wanted.
         throw new Error('Failed to save');
       }
       document.getElementById('waitlist-form').style.display = 'none';
