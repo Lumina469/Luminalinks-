@@ -3,7 +3,8 @@ import { WebView } from "react-native-webview";
 import { supabase } from '../../lib/supabase';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, Switch, Image, Linking, Animated, RefreshControl
+  TextInput, Alert, Switch, Image, Linking, Animated, RefreshControl,
+  PanResponder, Dimensions
 } from "react-native";
 import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,6 +15,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from "@expo-google-fonts/manrope";
 import * as Haptics from "expo-haptics";
+import { Audio } from "expo-av";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -378,6 +380,101 @@ const FadeInUp = ({ index = 0, children, style }: { index?: number; children: Re
   return <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>{children}</Animated.View>;
 };
 
+// Draggable floating "Ask Lumina" bubble — starts bottom-right, can be dragged
+// anywhere on screen. A tap (no real movement) opens the chat; an actual drag
+// just repositions it. Distinguishing the two is the whole trick here: a real
+// finger never holds perfectly still, so a small movement threshold is used
+// to tell "tap" and "drag" apart rather than treating any movement as a drag.
+function FloatingAIButton({ onPress }: { onPress: () => void }) {
+  const { width, height } = Dimensions.get("window");
+  const startPos = useRef({ x: width - 76, y: height - 220 }).current;
+  const pan = useRef(new Animated.ValueXY(startPos)).current;
+  const hasMoved = useRef(false);
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        hasMoved.current = false;
+        pan.setOffset({ x: (pan.x as any)._value, y: (pan.y as any)._value });
+        pan.setValue({ x: 0, y: 0 });
+      },
+      onPanResponderMove: (evt, gesture) => {
+        if (Math.abs(gesture.dx) > 6 || Math.abs(gesture.dy) > 6) hasMoved.current = true;
+        Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false })(evt, gesture);
+      },
+      onPanResponderRelease: () => {
+        pan.flattenOffset();
+        if (!hasMoved.current) onPress();
+      },
+    })
+  ).current;
+
+  return (
+    <Animated.View
+      {...panResponder.panHandlers}
+      style={{
+        position: "absolute",
+        transform: pan.getTranslateTransform(),
+        width: 56,
+        height: 56,
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 999,
+      }}
+    >
+      <Animated.View
+        style={{
+          position: "absolute",
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: "#2DD4BF",
+          opacity: ringOpacity,
+          transform: [{ scale: ringScale }],
+        }}
+      />
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: "#2DD4BF",
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#000",
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 3 },
+          elevation: 6,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <View style={{ width: 11, height: 11, borderRadius: 5.5, backgroundColor: "#04231F" }} />
+          <View style={{ width: 8, height: 1.5, backgroundColor: "#04231F99" }} />
+          <View style={{ width: 11, height: 11, borderRadius: 5.5, backgroundColor: "#0B1220" }} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     Manrope_600SemiBold,
@@ -443,6 +540,13 @@ export default function App() {
   const [pickupPin, setPickupPin] = useState<any>(null);
   const [dropoffPin, setDropoffPin] = useState<any>(null);
   const [pickupSugg, setPickupSugg] = useState<any[]>([]);
+  // Moved up from the Food Delivery state block further down — it was being
+  // referenced in a useEffect dependency array (below) before this line ever
+  // ran, since React executes component code top-to-bottom on each render.
+  // That's exactly what "Cannot access before initialization" means: the
+  // useEffect was reaching for a variable that, at that point in the file,
+  // hadn't been declared yet.
+  const [myRestaurant, setMyRestaurant] = useState<any>(null);
   const [bookingForSomeoneElse, setBookingForSomeoneElse] = useState(false);
   const [recipientName, setRecipientName] = useState("");
   const [recipientPhone, setRecipientPhone] = useState("");
@@ -477,6 +581,8 @@ export default function App() {
   const [homeAddressSugg, setHomeAddressSugg] = useState<any[]>([]);
   const [showPaystack, setShowPaystack] = useState(false);
   const [pendingPaymentBookingId, setPendingPaymentBookingId] = useState<string | null>(null);
+  const pendingPaymentBookingIdRef = useRef<string | null>(null);
+  useEffect(() => { pendingPaymentBookingIdRef.current = pendingPaymentBookingId; }, [pendingPaymentBookingId]);
   const [clientBookings, setClientBookings] = useState<any[]>([]);
   const [driverBookings, setDriverBookings] = useState<any[]>([]);
   const [activeBookingId, setActiveBookingId] = useState<string | null>(null);
@@ -511,6 +617,11 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [uploadingChatPhoto, setUploadingChatPhoto] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [uploadingVoiceNote, setUploadingVoiceNote] = useState(false);
+  const voiceRecordingRef = useRef<Audio.Recording | null>(null);
+  const [playingVoiceMsgId, setPlayingVoiceMsgId] = useState<string | null>(null);
+  const voiceSoundRef = useRef<Audio.Sound | null>(null);
 
   // Rating
   const [ratingBookingId, setRatingBookingId] = useState<string | null>(null);
@@ -561,6 +672,16 @@ export default function App() {
   const [tipAmount, setTipAmount] = useState(0);
   const [tipBookingId, setTipBookingId] = useState<string | null>(null);
   const [pendingRatingBookingId, setPendingRatingBookingId] = useState<string | null>(null);
+  // Refs mirroring the state above — fetchClientBookings runs inside a
+  // setInterval whose effect only re-runs when `screen` changes, so its
+  // closure otherwise sees stale values of these and can re-trigger the
+  // rating modal a second time before the state update from opening it the
+  // first time has actually been picked up. Same fix already used for ride
+  // alerts earlier in this file.
+  const pendingRatingBookingIdRef = useRef<string | null>(null);
+  const showRatingModalRef = useRef(false);
+  useEffect(() => { pendingRatingBookingIdRef.current = pendingRatingBookingId; }, [pendingRatingBookingId]);
+  useEffect(() => { showRatingModalRef.current = showRatingModal; }, [showRatingModal]);
 
   // SOS
   const [sosActive, setSosActive] = useState(false);
@@ -1035,7 +1156,7 @@ export default function App() {
           isRecent(b.created_at) &&
           !showPaystack
         );
-        if (needsCancellationFeePayment && pendingPaymentBookingId !== needsCancellationFeePayment.id) {
+        if (needsCancellationFeePayment && pendingPaymentBookingIdRef.current !== needsCancellationFeePayment.id) {
           triggerCancellationFeePayment(needsCancellationFeePayment);
           return;
         }
@@ -1045,9 +1166,9 @@ export default function App() {
           b.status === "completed" &&
           !b.rated &&
           isRecent(b.created_at) &&
-          !showRatingModal
+          !showRatingModalRef.current
         );
-        if (needsRating && pendingRatingBookingId !== needsRating.id) {
+        if (needsRating && pendingRatingBookingIdRef.current !== needsRating.id) {
           openRatingModal(needsRating.id);
         }
       }
@@ -1642,8 +1763,10 @@ export default function App() {
       client_lng: pickupPin?.longitude ?? null,
       // Booking-for-someone-else: the driver needs to know who they're
       // actually picking up, since it may not be whoever paid for the ride.
-      recipient_name: bookingForSomeoneElse ? recipientName.trim() || null : null,
-      recipient_phone: bookingForSomeoneElse ? recipientPhone.trim() || null : null,
+      // Parcels always have a recipient by definition, even though the
+      // "someone else" toggle (built for rides) stays untouched for them.
+      recipient_name: (bookingForSomeoneElse || service === "motorbike") ? recipientName.trim() || null : null,
+      recipient_phone: (bookingForSomeoneElse || service === "motorbike") ? recipientPhone.trim() || null : null,
     }).select().single();
 
     // Best-effort "share" — if the recipient's number happens to already
@@ -1694,6 +1817,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: u?.id,
+          userName: user?.name || "Client",
           role: ["car_driver", "tuktuk_driver", "motorbike_rider", "restaurant", "driver", "home_service"].includes(user?.role) ? "driver" : "client",
           message: messageText,
           bookingId: aiChatContext?.bookingId,
@@ -1755,6 +1879,10 @@ export default function App() {
     setSubmittingRide(true);
     try {
     if (!pickupText || !dropoffText) { showAlert("Missing", "Please enter pickup and dropoff"); return; }
+    if (selectedService === "motorbike" && (!recipientName.trim() || !recipientPhone.trim())) {
+      showAlert("Missing", "Please enter the recipient's name and phone number — the rider needs to know who to hand this parcel to.");
+      return;
+    }
     if (scheduleRide && (!scheduledDay || !scheduledTime)) {
       showAlert("Missing", "Please select a day and time for your scheduled ride.");
       return;
@@ -2759,6 +2887,103 @@ export default function App() {
   // keeps chat storage/costs bounded and matches the blueprint's in-app chat
   // scope (text-first, photos for showing something quickly, not a gallery).
   const CHAT_PHOTO_LIMIT = 5;
+  // Generic file upload helper (not image-specific) — reused for voice notes,
+  // where the content type is audio, not image/jpeg.
+  const uploadFileToStorage = async (localUri: string, bucket: string, path: string, contentType: string): Promise<string | null> => {
+    try {
+      const resp = await fetch(localUri);
+      const arrayBuffer = await resp.arrayBuffer();
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(path, arrayBuffer, { contentType, upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
+      return `${urlData.publicUrl}?t=${Date.now()}`;
+    } catch (e: any) {
+      console.log("File upload failed:", e?.message || e);
+      return null;
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== "granted") { showAlert("Microphone needed", "Please allow microphone access to send a voice note."); return; }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      voiceRecordingRef.current = recording;
+      setIsRecordingVoice(true);
+      haptic("medium");
+    } catch (e) {
+      showAlert("Couldn't start recording", "Please try again.");
+    }
+  };
+
+  const cancelVoiceRecording = async () => {
+    try {
+      await voiceRecordingRef.current?.stopAndUnloadAsync();
+    } catch (_) { /* already stopped */ }
+    voiceRecordingRef.current = null;
+    setIsRecordingVoice(false);
+  };
+
+  const stopAndSendVoiceRecording = async (bookingId: string) => {
+    const rec = voiceRecordingRef.current;
+    if (!rec) return;
+    setIsRecordingVoice(false);
+    try {
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      voiceRecordingRef.current = null;
+      if (!uri) return;
+
+      const status = await rec.getStatusAsync().catch(() => null);
+      const durationMs = status?.durationMillis || 0;
+      // Ignore accidental taps shorter than half a second — almost certainly
+      // not an intentional voice note.
+      if (durationMs < 500) return;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const senderId = sessionData?.session?.user?.id || "00000000-0000-0000-0000-000000000003";
+
+      setUploadingVoiceNote(true);
+      const voiceUrl = await uploadFileToStorage(uri, "chat-voice-notes", `${bookingId}/${senderId}/${Date.now()}.m4a`, "audio/m4a");
+      setUploadingVoiceNote(false);
+      if (!voiceUrl) { showAlert("Upload failed", "Could not send the voice note. Please try again."); return; }
+
+      await supabase.from("messages").insert({
+        booking_id: bookingId,
+        sender_id: senderId,
+        sender_name: user?.name || "User",
+        voice_url: voiceUrl,
+        voice_duration_ms: durationMs,
+        message: "🎤 Voice note",
+      });
+      fetchMessages(bookingId);
+      haptic("success");
+    } catch (e) {
+      setUploadingVoiceNote(false);
+      showAlert("Couldn't send", "Please try again.");
+    }
+  };
+
+  const playVoiceNote = async (messageId: string, url: string) => {
+    try {
+      if (playingVoiceMsgId === messageId) {
+        await voiceSoundRef.current?.stopAsync();
+        setPlayingVoiceMsgId(null);
+        return;
+      }
+      await voiceSoundRef.current?.unloadAsync();
+      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+      voiceSoundRef.current = sound;
+      setPlayingVoiceMsgId(messageId);
+      sound.setOnPlaybackStatusUpdate((s: any) => {
+        if (s.didJustFinish) setPlayingVoiceMsgId(null);
+      });
+    } catch (e) {
+      showAlert("Couldn't play", "This voice note couldn't be played.");
+    }
+  };
+
   const sendChatPhoto = async (bookingId: string) => {
     const { data: sessionData } = await supabase.auth.getSession();
     const u = sessionData?.session?.user;
@@ -2986,12 +3211,26 @@ export default function App() {
       category: newItemCategory.trim() || null,
       photo_url: photoUrl,
       is_available: true,
+      options: newItemOptions.length > 0 ? newItemOptions : null,
     });
     setUploadingMenuItem(false);
     if (error) { showAlert("Error", error.message); return; }
     setNewItemName(""); setNewItemDesc(""); setNewItemPrice(""); setNewItemCategory(""); setNewItemPhoto(null);
+    setNewItemOptions([]); setNewOptionName(""); setNewOptionPrice("");
     fetchMenuItems(myRestaurant.id);
     showAlert("Added!", `${newItemName} is now on your menu.`);
+  };
+
+  const addOptionToNewItem = () => {
+    if (!newOptionName.trim()) return;
+    const price = parseFloat(newOptionPrice) || 0;
+    setNewItemOptions(prev => [...prev, { name: newOptionName.trim(), price }]);
+    setNewOptionName("");
+    setNewOptionPrice("");
+  };
+
+  const removeOptionFromNewItem = (index: number) => {
+    setNewItemOptions(prev => prev.filter((_, i) => i !== index));
   };
 
   const toggleMenuItemAvailable = async (item: any) => {
@@ -3017,9 +3256,23 @@ export default function App() {
       .from("restaurants")
       .select("*")
       .eq("is_approved", true)
-      .eq("is_open", true)
-      .order("business_name", { ascending: true });
-    if (data) setRestaurantList(data);
+      .eq("is_open", true);
+    if (data) {
+      // Sort by actual distance from the client's current location — falls
+      // back to alphabetical for any restaurant missing stored coordinates,
+      // and pushes those to the end rather than guessing a distance for them.
+      const withDistance = data.map((r: any) => ({
+        ...r,
+        _distanceKm: (location && r.lat && r.lng) ? getDist(location.latitude, location.longitude, r.lat, r.lng) : null,
+      }));
+      withDistance.sort((a: any, b: any) => {
+        if (a._distanceKm == null && b._distanceKm == null) return a.business_name.localeCompare(b.business_name);
+        if (a._distanceKm == null) return 1;
+        if (b._distanceKm == null) return -1;
+        return a._distanceKm - b._distanceKm;
+      });
+      setRestaurantList(withDistance);
+    }
   };
 
   const openRestaurantMenu = async (restaurant: any) => {
@@ -3035,23 +3288,52 @@ export default function App() {
     go("restaurantMenu");
   };
 
-  const addToCart = (item: any) => {
+  // A cart "line" is identified by item id + exactly which options were
+  // chosen — two orders of the same dish with different customizations
+  // (e.g. one plain, one extra spicy) are genuinely different line items,
+  // not the same one with quantity 2.
+  const cartLineKey = (itemId: string, selectedOptions: { name: string; price: number }[]) =>
+    `${itemId}::${(selectedOptions || []).map(o => o.name).sort().join(",")}`;
+
+  const addToCart = (item: any, selectedOptions: { name: string; price: number }[] = []) => {
+    const key = cartLineKey(item.id, selectedOptions);
     setFoodCart(prev => {
-      const existing = prev.find(c => c.item.id === item.id);
-      if (existing) return prev.map(c => c.item.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { item, quantity: 1 }];
+      const existing = prev.find(c => cartLineKey(c.item.id, c.selectedOptions) === key);
+      if (existing) return prev.map(c => cartLineKey(c.item.id, c.selectedOptions) === key ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { item, quantity: 1, selectedOptions }];
     });
   };
 
-  const removeFromCart = (itemId: string) => {
+  const openCustomizeItem = (item: any) => {
+    if (!item.options || item.options.length === 0) {
+      addToCart(item);
+      return;
+    }
+    setCustomizingItem(item);
+    setChosenOptionNames([]);
+  };
+
+  const confirmCustomizedItem = () => {
+    if (!customizingItem) return;
+    const selected = (customizingItem.options || []).filter((o: any) => chosenOptionNames.includes(o.name));
+    addToCart(customizingItem, selected);
+    setCustomizingItem(null);
+    setChosenOptionNames([]);
+  };
+
+  const removeFromCart = (itemId: string, selectedOptions: { name: string; price: number }[] = []) => {
+    const key = cartLineKey(itemId, selectedOptions);
     setFoodCart(prev => {
-      const existing = prev.find(c => c.item.id === itemId);
-      if (existing && existing.quantity > 1) return prev.map(c => c.item.id === itemId ? { ...c, quantity: c.quantity - 1 } : c);
-      return prev.filter(c => c.item.id !== itemId);
+      const existing = prev.find(c => cartLineKey(c.item.id, c.selectedOptions) === key);
+      if (existing && existing.quantity > 1) return prev.map(c => cartLineKey(c.item.id, c.selectedOptions) === key ? { ...c, quantity: c.quantity - 1 } : c);
+      return prev.filter(c => cartLineKey(c.item.id, c.selectedOptions) !== key);
     });
   };
 
-  const cartTotal = () => foodCart.reduce((sum, c) => sum + c.item.price * c.quantity, 0);
+  const lineItemPrice = (c: { item: any; selectedOptions: { name: string; price: number }[] }) =>
+    c.item.price + (c.selectedOptions || []).reduce((sum, o) => sum + (o.price || 0), 0);
+
+  const cartTotal = () => foodCart.reduce((sum, c) => sum + lineItemPrice(c) * c.quantity, 0);
 
   // Same fee formula as Section 3 of the blueprint: GHS 3 base + GHS 4/km, GHS 10 minimum
   const calcDeliveryFee = (km: number) => {
@@ -3093,9 +3375,12 @@ export default function App() {
     const itemRows = foodCart.map(c => ({
       order_id: order.id,
       menu_item_id: c.item.id,
-      item_name: c.item.name,
-      item_price: c.item.price,
+      item_name: c.selectedOptions && c.selectedOptions.length > 0
+        ? `${c.item.name} (${c.selectedOptions.map(o => o.name).join(", ")})`
+        : c.item.name,
+      item_price: lineItemPrice(c),
       quantity: c.quantity,
+      selected_options: c.selectedOptions && c.selectedOptions.length > 0 ? c.selectedOptions : null,
     }));
     await supabase.from("food_order_items").insert(itemRows);
 
@@ -3649,10 +3934,12 @@ export default function App() {
   // ============================================================
   // FOOD DELIVERY STATE
   // ============================================================
-  const [myRestaurant, setMyRestaurant] = useState<any>(null);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [uploadingMenuItem, setUploadingMenuItem] = useState(false);
   const [newItemName, setNewItemName] = useState("");
+  const [newItemOptions, setNewItemOptions] = useState<{ name: string; price: number }[]>([]);
+  const [newOptionName, setNewOptionName] = useState("");
+  const [newOptionPrice, setNewOptionPrice] = useState("");
   const [newItemDesc, setNewItemDesc] = useState("");
   const [newItemPrice, setNewItemPrice] = useState("");
   const [newItemCategory, setNewItemCategory] = useState("");
@@ -3662,7 +3949,9 @@ export default function App() {
   const [restaurantList, setRestaurantList] = useState<any[]>([]);
   const [viewingRestaurant, setViewingRestaurant] = useState<any>(null);
   const [viewingMenu, setViewingMenu] = useState<any[]>([]);
-  const [foodCart, setFoodCart] = useState<{ item: any; quantity: number }[]>([]);
+  const [foodCart, setFoodCart] = useState<{ item: any; quantity: number; selectedOptions: { name: string; price: number }[] }[]>([]);
+  const [customizingItem, setCustomizingItem] = useState<any>(null);
+  const [chosenOptionNames, setChosenOptionNames] = useState<string[]>([]);
   const [foodOrders, setFoodOrders] = useState<any[]>([]);
   const [activeFoodOrderId, setActiveFoodOrderId] = useState<string | null>(null);
   const [activeDeliveryStage, setActiveDeliveryStage] = useState<"pickup" | "delivery">("pickup");
@@ -4963,7 +5252,7 @@ export default function App() {
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <TouchableOpacity onPress={() => setShowAIChat(false)}><Text style={s.navLink}>Close</Text></TouchableOpacity>
-        <Text style={s.navLogo}>✨ Lumina</Text>
+        <Text style={s.navLogo}>Lumina</Text>
         <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, flexGrow: 1 }}>
@@ -4979,14 +5268,14 @@ export default function App() {
               },
             ]}>
             {m.role === "assistant" && (
-              <Text style={{ color: "#2DD4BF", fontSize: 11, fontWeight: "700", marginBottom: 2 }}>✨ Lumina</Text>
+              <Text style={{ color: "#2DD4BF", fontSize: 11, fontWeight: "700", marginBottom: 2 }}>Lumina</Text>
             )}
             <Text style={{ color: "#F4F6FB" }}>{m.content}</Text>
           </View>
         ))}
         {aiChatLoading && (
           <View style={[s.chatBubble, { backgroundColor: "#131C2E", alignSelf: "flex-start" }]}>
-            <Text style={{ color: "#8A9BB8", fontSize: 13 }}>✨ Thinking...</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 13 }}>Thinking...</Text>
           </View>
         )}
       </ScrollView>
@@ -5659,7 +5948,12 @@ export default function App() {
   );
 
   // RESTAURANT HOME
-  if (screen === "restaurantHome") return (
+  if (screen === "restaurantHome") {
+    const today = new Date().toDateString();
+    const todaysOrders = incomingFoodOrders.filter(o => new Date(o.created_at).toDateString() === today);
+    const todaysDelivered = todaysOrders.filter(o => o.status === "delivered");
+    const todaysRevenue = todaysDelivered.reduce((sum, o) => sum + (o.total || 0), 0);
+    return (
     <SafeAreaView style={s.safe}>
       <View style={s.nav}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Wordmark fontSize={18} /><Text style={{ color: "#8A9BB8", fontSize: 14, fontWeight: "600" }}>Restaurant</Text></View>
@@ -5676,10 +5970,21 @@ export default function App() {
         </View>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <Text style={{ color: "#F4F6FB", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>{myRestaurant?.business_name || "Your Restaurant"}</Text>
-        <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 16 }}>
-          {myRestaurant?.is_approved ? "Manage your menu and orders" : "Your application is under review — you'll be notified once approved"}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 18 }}>
+          {myRestaurant?.restaurant_photo ? (
+            <Image source={{ uri: myRestaurant.restaurant_photo }} style={{ width: 54, height: 54, borderRadius: 16, marginRight: 14 }} />
+          ) : (
+            <View style={{ width: 54, height: 54, borderRadius: 16, marginRight: 14, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="restaurant" size={26} color="#2DD4BF" />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#F4F6FB", fontSize: 18, fontWeight: "800" }}>{myRestaurant?.business_name || "Your Restaurant"}</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 2 }}>
+              {myRestaurant?.is_approved ? "Manage your menu and orders" : "Application under review"}
+            </Text>
+          </View>
+        </View>
 
         {birthdayMode && (
           <View style={{ backgroundColor: "#2a1f0a", borderWidth: 1, borderColor: "#c9a84c", borderRadius: 12, padding: 14, marginBottom: 16 }}>
@@ -5687,10 +5992,24 @@ export default function App() {
           </View>
         )}
 
-        <View style={s.onlineRow}>
-          <View>
-            <Text style={{ color: "#F4F6FB", fontWeight: "bold" }}>Status</Text>
-            <Text style={{ color: myRestaurant?.is_open ? "#2DD4BF" : "#8A9BB8", fontSize: 13 }}>{myRestaurant?.is_open ? "Open — Receiving Orders" : "Closed"}</Text>
+        <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
+          <View style={{ flex: 1, backgroundColor: "#131C2E", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "#1B2A44" }}>
+            <Text style={{ color: "#8A9BB8", fontSize: 11, fontWeight: "700", textTransform: "uppercase" }}>Today's Orders</Text>
+            <Text style={{ color: "#F4F6FB", fontSize: 24, fontWeight: "800", marginTop: 4 }}>{todaysOrders.length}</Text>
+          </View>
+          <View style={{ flex: 1, backgroundColor: "#131C2E", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "#1B2A44" }}>
+            <Text style={{ color: "#8A9BB8", fontSize: 11, fontWeight: "700", textTransform: "uppercase" }}>Today's Revenue</Text>
+            <Text style={{ color: "#2DD4BF", fontSize: 24, fontWeight: "800", marginTop: 4 }}>GHS {todaysRevenue.toFixed(0)}</Text>
+          </View>
+        </View>
+
+        <View style={[s.onlineRow, { borderColor: myRestaurant?.is_open ? "#2DD4BF" : "#1B2A44", borderWidth: 1 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: myRestaurant?.is_open ? "#2DD4BF" : "#5A6B85", marginRight: 10 }} />
+            <View>
+              <Text style={{ color: "#F4F6FB", fontWeight: "bold" }}>Status</Text>
+              <Text style={{ color: myRestaurant?.is_open ? "#2DD4BF" : "#8A9BB8", fontSize: 13 }}>{myRestaurant?.is_open ? "Open — Receiving Orders" : "Closed"}</Text>
+            </View>
           </View>
           <Switch
             value={!!myRestaurant?.is_open}
@@ -5734,7 +6053,8 @@ export default function App() {
         </Tappable>
       </ScrollView>
     </SafeAreaView>
-  );
+    );
+  }
 
   // MENU MANAGEMENT
   if (screen === "menuManagement") return (
@@ -5750,17 +6070,29 @@ export default function App() {
           <EmptyState icon="restaurant-outline" title="No dishes yet" subtitle="Add your first dish below — a photo, name, and price is all it takes to go live." />
         ) : (
           menuItems.map((item) => (
-            <View key={item.id} style={[s.card, { flexDirection: "row", alignItems: "center", opacity: item.is_available ? 1 : 0.5 }]}>
-              <Image source={{ uri: item.photo_url }} style={{ width: 56, height: 56, borderRadius: 10, marginRight: 14 }} />
+            <View key={item.id} style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#131C2E", borderRadius: 16, borderWidth: 1, borderColor: "#1B2A44", padding: 12, marginBottom: 12, opacity: item.is_available ? 1 : 0.55 }}>
+              <Image source={{ uri: item.photo_url }} style={{ width: 60, height: 60, borderRadius: 12, marginRight: 14 }} />
               <View style={{ flex: 1 }}>
-                <Text style={s.cardTitle}>{item.name}</Text>
-                <Text style={s.cardSub}>GHS {item.price}{item.category ? ` — ${item.category}` : ""}</Text>
+                <Text style={{ color: "#F4F6FB", fontSize: 15, fontWeight: "700" }}>{item.name}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 6 }}>
+                  <Text style={{ color: "#2DD4BF", fontWeight: "700", fontSize: 13 }}>GHS {item.price}</Text>
+                  {item.category && (
+                    <View style={{ backgroundColor: "#8A9BB822", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}>
+                      <Text style={{ color: "#8A9BB8", fontSize: 10, fontWeight: "600" }}>{item.category}</Text>
+                    </View>
+                  )}
+                  {!item.is_available && (
+                    <View style={{ backgroundColor: "#F8717122", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 }}>
+                      <Text style={{ color: "#F87171", fontSize: 10, fontWeight: "700" }}>HIDDEN</Text>
+                    </View>
+                  )}
+                </View>
               </View>
-              <TouchableOpacity onPress={() => toggleMenuItemAvailable(item)} style={{ marginRight: 12 }}>
-                <Ionicons name={item.is_available ? "eye" : "eye-off"} size={22} color={item.is_available ? "#2DD4BF" : "#5A6B85"} />
+              <TouchableOpacity onPress={() => toggleMenuItemAvailable(item)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#0B1220", alignItems: "center", justifyContent: "center", marginRight: 8 }}>
+                <Ionicons name={item.is_available ? "eye" : "eye-off"} size={18} color={item.is_available ? "#2DD4BF" : "#5A6B85"} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => deleteMenuItem(item)}>
-                <Ionicons name="trash-outline" size={20} color="#F87171" />
+              <TouchableOpacity onPress={() => deleteMenuItem(item)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#0B1220", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="trash-outline" size={18} color="#F87171" />
               </TouchableOpacity>
             </View>
           ))
@@ -5775,6 +6107,31 @@ export default function App() {
         <TextInput style={s.input} placeholder="Description (optional)" placeholderTextColor="#5A6B85" value={newItemDesc} onChangeText={setNewItemDesc} />
         <TextInput style={s.input} placeholder="Price (GHS)" placeholderTextColor="#5A6B85" value={newItemPrice} onChangeText={setNewItemPrice} keyboardType="numeric" />
         <TextInput style={s.input} placeholder="Category (optional, e.g. Rice, Drinks)" placeholderTextColor="#5A6B85" value={newItemCategory} onChangeText={setNewItemCategory} />
+
+        <Text style={s.sectionTitle}>GARNISH & SPICE OPTIONS (OPTIONAL)</Text>
+        <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+          Let clients customize this dish — extra pepper, no onions, spice level, add cheese, etc. Leave price at 0 for free options.
+        </Text>
+        {newItemOptions.length > 0 && (
+          <View style={[s.card, { marginBottom: 12 }]}>
+            {newItemOptions.map((opt, i) => (
+              <View key={i} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: i < newItemOptions.length - 1 ? 1 : 0, borderBottomColor: "#1B2A44" }}>
+                <Text style={{ color: "#F4F6FB", fontSize: 13 }}>{opt.name}{opt.price > 0 ? ` (+GHS ${opt.price.toFixed(2)})` : " (Free)"}</Text>
+                <TouchableOpacity onPress={() => removeOptionFromNewItem(i)}>
+                  <Ionicons name="close-circle" size={20} color="#F87171" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+          <TextInput style={[s.input, { flex: 2, marginBottom: 0 }]} placeholder="e.g. Extra Pepper" placeholderTextColor="#5A6B85" value={newOptionName} onChangeText={setNewOptionName} />
+          <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="GHS 0" placeholderTextColor="#5A6B85" value={newOptionPrice} onChangeText={setNewOptionPrice} keyboardType="numeric" />
+          <TouchableOpacity style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center" }} onPress={addOptionToNewItem}>
+            <Ionicons name="add" size={22} color="#2DD4BF" />
+          </TouchableOpacity>
+        </View>
+
         {uploadingMenuItem ? (
           <Pulse label="Adding dish..." size={32} />
         ) : (
@@ -5871,19 +6228,6 @@ export default function App() {
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: "#F4F6FB", fontSize: 18, fontWeight: "bold", marginBottom: 4 }}>Welcome, {user?.name}!</Text>
         <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 12 }}>{`Keep ${(100 - PLATFORM_SETTINGS.platform_commission * 100).toFixed(0)}% of every fare + 100% of tips`}</Text>
-
-        <TouchableOpacity
-          onPress={() => openAIChat({})}
-          style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 16 }]}>
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-            <Ionicons name="sparkles" size={22} color="#2DD4BF" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Ask Lumina</Text>
-            <Text style={s.cardSub}>Your AI assistant — ask anything about rides, payouts, or your account</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
-        </TouchableOpacity>
 
         {birthdayMode && (
           <View style={{ backgroundColor: "#2a1f0a", borderWidth: 1, borderColor: "#2DD4BF", borderRadius: 12, padding: 14, marginBottom: 16 }}>
@@ -6005,6 +6349,7 @@ export default function App() {
           <Ionicons name="chevron-forward" size={20} color="#5B8FE0" />
         </TouchableOpacity>
       </ScrollView>
+      <FloatingAIButton onPress={() => openAIChat({})} />
     </SafeAreaView>
   );
 
@@ -6064,9 +6409,7 @@ export default function App() {
       <View style={s.nav}>
         <TouchableOpacity onPress={() => go("clientOrders")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
         <Text style={s.navLogo}>Active Ride</Text>
-        <TouchableOpacity onPress={() => openAIChat({ bookingId: activeBookingId || undefined })}>
-          <Ionicons name="sparkles" size={20} color="#2DD4BF" />
-        </TouchableOpacity>
+        <View />
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <View style={s.card}>
@@ -6135,9 +6478,17 @@ export default function App() {
                       : chatMessages.map((m, i) => (
                         <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
                           <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                          {m.image_url
-                            ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                            : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                          {m.voice_url ? (
+                            <TouchableOpacity onPress={() => playVoiceNote(m.id || String(i), m.voice_url)} style={{ flexDirection: "row", alignItems: "center", marginTop: 4, paddingVertical: 4 }}>
+                              <Ionicons name={playingVoiceMsgId === (m.id || String(i)) ? "pause-circle" : "play-circle"} size={30} color="#2DD4BF" />
+                              <View style={{ marginLeft: 8, height: 3, width: 90, backgroundColor: "#2DD4BF44", borderRadius: 2 }} />
+                              <Text style={{ color: "#8A9BB8", fontSize: 11, marginLeft: 8 }}>{m.voice_duration_ms ? `${Math.round(m.voice_duration_ms / 1000)}s` : ""}</Text>
+                            </TouchableOpacity>
+                          ) : m.image_url ? (
+                            <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
+                          ) : (
+                            <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>
+                          )}
                         </View>
                       ))
                     }
@@ -6149,11 +6500,23 @@ export default function App() {
                       onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
                       {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isRecordingVoice ? "#F87171" : "#131C2E", borderWidth: 1, borderColor: isRecordingVoice ? "#F87171" : "#1B2A44", alignItems: "center", justifyContent: "center" }}
+                      disabled={uploadingVoiceNote}
+                      onPressIn={startVoiceRecording}
+                      onPressOut={() => activeBookingId && stopAndSendVoiceRecording(activeBookingId)}>
+                      {uploadingVoiceNote ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="mic" size={20} color={isRecordingVoice ? "#fff" : "#2DD4BF"} />}
+                    </TouchableOpacity>
                     <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
                     <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
                       <Text style={s.btnTxt}>Send</Text>
                     </TouchableOpacity>
                   </View>
+                  {isRecordingVoice && (
+                    <Text style={{ color: "#F87171", fontSize: 12, textAlign: "center", marginTop: -12, marginBottom: 12 }}>
+                      Recording... release the mic to send, or move away to cancel
+                    </Text>
+                  )}
                 </>
               )}
             </>
@@ -6233,6 +6596,7 @@ export default function App() {
           </TouchableOpacity>
         )}
       </ScrollView>
+      <FloatingAIButton onPress={() => openAIChat({ bookingId: activeBookingId || undefined })} />
     </SafeAreaView>
   );
   }
@@ -6421,19 +6785,6 @@ export default function App() {
           </View>
         </Tappable>
 
-        <TouchableOpacity
-          onPress={() => openAIChat({})}
-          style={[s.card, { flexDirection: "row", alignItems: "center", borderColor: "#2DD4BF", borderWidth: 1, marginBottom: 20 }]}>
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-            <Ionicons name="sparkles" size={22} color="#2DD4BF" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.cardTitle}>Ask Lumina</Text>
-            <Text style={s.cardSub}>Your AI assistant — ask anything about rides, orders, or payments</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
-        </TouchableOpacity>
-
         <Text style={s.sectionTitle}>SERVICES</Text>
 
         {/* Hero card — Car Ride is the primary action, given full width and more visual weight */}
@@ -6533,6 +6884,7 @@ export default function App() {
           <Ionicons name="chevron-forward" size={20} color="#5B8FE0" />
         </TouchableOpacity>
       </ScrollView>
+      <FloatingAIButton onPress={() => openAIChat({})} />
     </SafeAreaView>
   );
   if (screen === "emergencyContacts") return (
@@ -6641,24 +6993,45 @@ export default function App() {
         <TouchableOpacity onPress={() => go("myFoodOrders")}><Ionicons name="receipt-outline" size={22} color="#2DD4BF" /></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <View style={{ marginBottom: 20 }}>
+          <Text style={{ color: "#F4F6FB", fontSize: 20, fontWeight: "800" }}>What are you craving?</Text>
+          <Text style={{ color: "#8A9BB8", fontSize: 13, marginTop: 4 }}>
+            {restaurantList.length > 0 ? `${restaurantList.length} restaurant${restaurantList.length === 1 ? "" : "s"} open near you` : "Browse restaurants near you"}
+          </Text>
+        </View>
         {restaurantList.length === 0 ? (
           <EmptyState icon="restaurant-outline" title="No restaurants open right now" subtitle="Check back soon — restaurants and vendors will appear here once they're open for orders." />
         ) : (
           restaurantList.map((r, i) => (
             <FadeInUp key={r.id} index={i}>
-              <Tappable onPress={() => openRestaurantMenu(r)} style={[s.card, { flexDirection: "row", alignItems: "center" }]}>
-                {r.restaurant_photo ? (
-                  <Image source={{ uri: r.restaurant_photo }} style={{ width: 56, height: 56, borderRadius: 12, marginRight: 14 }} />
-                ) : (
-                  <View style={{ width: 56, height: 56, borderRadius: 12, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
-                    <Ionicons name="restaurant" size={26} color="#2DD4BF" />
+              <Tappable onPress={() => openRestaurantMenu(r)} style={{ marginBottom: 18, borderRadius: 18, overflow: "hidden", backgroundColor: "#131C2E", borderWidth: 1, borderColor: "#1B2A44" }}>
+                <View style={{ height: 130, backgroundColor: "#0B1220" }}>
+                  {r.restaurant_photo ? (
+                    <Image source={{ uri: r.restaurant_photo }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                  ) : (
+                    <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "#2DD4BF14" }}>
+                      <Ionicons name="restaurant" size={40} color="#2DD4BF" />
+                    </View>
+                  )}
+                  <View style={{ position: "absolute", top: 10, left: 10, backgroundColor: "#04231F", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, flexDirection: "row", alignItems: "center" }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#2DD4BF", marginRight: 5 }} />
+                    <Text style={{ color: "#2DD4BF", fontSize: 11, fontWeight: "700" }}>OPEN</Text>
                   </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text style={s.cardTitle}>{r.business_name}</Text>
-                  <Text style={s.cardSub}>Open for orders</Text>
+                  {r._distanceKm != null && (
+                    <View style={{ position: "absolute", top: 10, right: 10, backgroundColor: "rgba(11,18,32,0.85)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+                      <Text style={{ color: "#F4F6FB", fontSize: 11, fontWeight: "700" }}>{r._distanceKm.toFixed(1)} km</Text>
+                    </View>
+                  )}
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#2DD4BF" />
+                <View style={{ padding: 14, flexDirection: "row", alignItems: "center" }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#F4F6FB", fontSize: 16, fontWeight: "800" }}>{r.business_name}</Text>
+                    <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 3 }}>Tap to see the menu</Text>
+                  </View>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#2DD4BF22", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name="chevron-forward" size={18} color="#2DD4BF" />
+                  </View>
+                </View>
               </Tappable>
             </FadeInUp>
           ))
@@ -6675,32 +7048,52 @@ export default function App() {
         <Text style={s.navLogo} numberOfLines={1}>{viewingRestaurant?.business_name}</Text>
         <View />
       </View>
+      {viewingRestaurant?.restaurant_photo && (
+        <View style={{ height: 130, width: "100%" }}>
+          <Image source={{ uri: viewingRestaurant.restaurant_photo }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+          <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 50, backgroundColor: "#0B1220", opacity: 0.85 }} />
+        </View>
+      )}
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+        <Text style={s.sectionTitle}>MENU</Text>
         {viewingMenu.length === 0 ? (
           <EmptyState icon="fast-food-outline" title="No dishes available" subtitle="This restaurant hasn't added any dishes yet." />
         ) : (
           viewingMenu.map((item) => {
-            const inCart = foodCart.find(c => c.item.id === item.id);
+            const inCart = foodCart.find(c => c.item.id === item.id && (!c.selectedOptions || c.selectedOptions.length === 0));
+            const hasOptions = item.options && item.options.length > 0;
+            const cartQtyForItem = foodCart.filter(c => c.item.id === item.id).reduce((n, c) => n + c.quantity, 0);
             return (
-              <View key={item.id} style={[s.card, { flexDirection: "row", alignItems: "center" }]}>
-                <Image source={{ uri: item.photo_url }} style={{ width: 60, height: 60, borderRadius: 10, marginRight: 14 }} />
+              <View key={item.id} style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#131C2E", borderRadius: 16, borderWidth: 1, borderColor: cartQtyForItem > 0 ? "#2DD4BF" : "#1B2A44", padding: 12, marginBottom: 12 }}>
+                {item.photo_url ? (
+                  <Image source={{ uri: item.photo_url }} style={{ width: 68, height: 68, borderRadius: 12, marginRight: 14 }} />
+                ) : (
+                  <View style={{ width: 68, height: 68, borderRadius: 12, marginRight: 14, backgroundColor: "#2DD4BF14", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name="fast-food" size={26} color="#2DD4BF" />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
-                  <Text style={s.cardTitle}>{item.name}</Text>
-                  {item.description ? <Text style={s.cardSub}>{item.description}</Text> : null}
-                  <Text style={{ color: "#2DD4BF", fontWeight: "bold", marginTop: 4 }}>GHS {item.price}</Text>
+                  <Text style={{ color: "#F4F6FB", fontSize: 15, fontWeight: "700" }}>{item.name}</Text>
+                  {item.description ? <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 2 }} numberOfLines={2}>{item.description}</Text> : null}
+                  <Text style={{ color: "#2DD4BF", fontWeight: "800", marginTop: 6, fontSize: 15 }}>GHS {item.price}</Text>
+                  {hasOptions && <Text style={{ color: "#8A9BB8", fontSize: 11, marginTop: 2 }}>Customizable{cartQtyForItem > 0 ? ` · ${cartQtyForItem} in cart` : ""}</Text>}
                 </View>
-                {inCart ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                    <TouchableOpacity onPress={() => removeFromCart(item.id)} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}>
-                      <Ionicons name="remove" size={18} color="#F4F6FB" />
+                {hasOptions ? (
+                  <TouchableOpacity onPress={() => openCustomizeItem(item)} style={{ paddingHorizontal: 14, height: 36, borderRadius: 18, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: "#04231F", fontWeight: "800", fontSize: 12 }}>Customize</Text>
+                  </TouchableOpacity>
+                ) : inCart ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#0B1220", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4 }}>
+                    <TouchableOpacity onPress={() => removeFromCart(item.id)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name="remove" size={16} color="#F4F6FB" />
                     </TouchableOpacity>
-                    <Text style={{ color: "#F4F6FB", fontWeight: "700" }}>{inCart.quantity}</Text>
-                    <TouchableOpacity onPress={() => addToCart(item)} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
-                      <Ionicons name="add" size={18} color="#04231F" />
+                    <Text style={{ color: "#F4F6FB", fontWeight: "700", minWidth: 16, textAlign: "center" }}>{inCart.quantity}</Text>
+                    <TouchableOpacity onPress={() => addToCart(item)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name="add" size={16} color="#04231F" />
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <TouchableOpacity onPress={() => addToCart(item)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
+                  <TouchableOpacity onPress={() => addToCart(item)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
                     <Ionicons name="add" size={20} color="#04231F" />
                   </TouchableOpacity>
                 )}
@@ -6709,8 +7102,41 @@ export default function App() {
           })
         )}
       </ScrollView>
+      {customizingItem && (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(11,18,32,0.92)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: "#131C2E", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: "75%" }}>
+            <Text style={{ color: "#F4F6FB", fontSize: 17, fontWeight: "800", marginBottom: 4 }}>{customizingItem.name}</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 13, marginBottom: 16 }}>Choose any garnish or spice options</Text>
+            <ScrollView style={{ maxHeight: 260, marginBottom: 16 }}>
+              {(customizingItem.options || []).map((opt: any, i: number) => {
+                const isChosen = chosenOptionNames.includes(opt.name);
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    onPress={() => setChosenOptionNames(prev => isChosen ? prev.filter(n => n !== opt.name) : [...prev, opt.name])}
+                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#1B2A44" }}>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Ionicons name={isChosen ? "checkbox" : "square-outline"} size={22} color={isChosen ? "#2DD4BF" : "#5A6B85"} />
+                      <Text style={{ color: "#F4F6FB", fontSize: 14, marginLeft: 10 }}>{opt.name}</Text>
+                    </View>
+                    <Text style={{ color: "#8A9BB8", fontSize: 13 }}>{opt.price > 0 ? `+GHS ${opt.price.toFixed(2)}` : "Free"}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity style={[s.btnOut, { flex: 1 }]} onPress={() => { setCustomizingItem(null); setChosenOptionNames([]); }}>
+                <Text style={s.btnOutTxt}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.btn, { flex: 1, marginTop: 0 }]} onPress={confirmCustomizedItem}>
+                <Text style={s.btnTxt}>Add to Cart</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
       {foodCart.length > 0 && (
-        <TouchableOpacity style={{ position: "absolute", bottom: 20, left: 20, right: 20, backgroundColor: "#2DD4BF", borderRadius: 14, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onPress={() => go("foodCart")}>
+        <TouchableOpacity style={{ position: "absolute", bottom: 20, left: 20, right: 20, backgroundColor: "#2DD4BF", borderRadius: 14, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 }} onPress={() => go("foodCart")}>
           <Text style={{ color: "#04231F", fontWeight: "800", fontSize: 15 }}>{foodCart.reduce((n, c) => n + c.quantity, 0)} item{foodCart.reduce((n, c) => n + c.quantity, 0) === 1 ? "" : "s"} — View Cart</Text>
           <Text style={{ color: "#04231F", fontWeight: "800", fontSize: 15 }}>GHS {cartTotal().toFixed(2)}</Text>
         </TouchableOpacity>
@@ -6728,10 +7154,25 @@ export default function App() {
       </View>
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={s.sectionTitle}>ITEMS</Text>
-        {foodCart.map((c) => (
-          <View key={c.item.id} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }}>
-            <Text style={{ color: "#F4F6FB", fontSize: 14 }}>{c.quantity}x {c.item.name}</Text>
-            <Text style={{ color: "#8A9BB8", fontSize: 14 }}>GHS {(c.item.price * c.quantity).toFixed(2)}</Text>
+        {foodCart.map((c, ci) => (
+          <View key={cartLineKey(c.item.id, c.selectedOptions) + ci} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ color: "#F4F6FB", fontSize: 14 }}>{c.quantity}x {c.item.name}</Text>
+              <Text style={{ color: "#8A9BB8", fontSize: 14 }}>GHS {(lineItemPrice(c) * c.quantity).toFixed(2)}</Text>
+            </View>
+            {c.selectedOptions && c.selectedOptions.length > 0 && (
+              <Text style={{ color: "#5A6B85", fontSize: 12, marginTop: 2 }}>
+                + {c.selectedOptions.map(o => o.name).join(", ")}
+              </Text>
+            )}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 }}>
+              <TouchableOpacity onPress={() => removeFromCart(c.item.id, c.selectedOptions)} style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "#1B2A44", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="remove" size={14} color="#F4F6FB" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => addToCart(c.item, c.selectedOptions)} style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: "#2DD4BF", alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="add" size={14} color="#04231F" />
+              </TouchableOpacity>
+            </View>
           </View>
         ))}
         <View style={s.divider} />
@@ -6851,9 +7292,7 @@ export default function App() {
         <View style={s.nav}>
           <TouchableOpacity onPress={() => go("myFoodOrders")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
           <Text style={s.navLogo}>Order Status</Text>
-          <TouchableOpacity onPress={() => openAIChat({ orderId: activeFoodOrderId || undefined })}>
-            <Ionicons name="sparkles" size={20} color="#2DD4BF" />
-          </TouchableOpacity>
+          <View />
         </View>
         <ScrollView contentContainerStyle={{ padding: 20 }}>
           <View style={s.card}>
@@ -6921,6 +7360,7 @@ export default function App() {
             </>
           )}
         </ScrollView>
+        <FloatingAIButton onPress={() => openAIChat({ orderId: activeFoodOrderId || undefined })} />
       </SafeAreaView>
     );
   }
@@ -7254,6 +7694,17 @@ export default function App() {
           </>
         )}
 
+        {selectedService === "motorbike" && (
+          <View style={[s.card, { borderColor: "#ff5722", borderWidth: 1, marginBottom: 16 }]}>
+            <Text style={s.sectionTitle}>WHO IS RECEIVING THIS PARCEL?</Text>
+            <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+              Required — the rider needs to know who to hand this to and how to reach them.
+            </Text>
+            <TextInput style={s.input} placeholder="Recipient's name" placeholderTextColor="#5A6B85" value={recipientName} onChangeText={setRecipientName} />
+            <TextInput style={[s.input, { marginBottom: 0 }]} placeholder="Recipient's phone number" placeholderTextColor="#5A6B85" value={recipientPhone} onChangeText={setRecipientPhone} keyboardType="phone-pad" />
+          </View>
+        )}
+
         <TouchableOpacity
           onPress={() => setShowMoreBookingOptions(!showMoreBookingOptions)}
           style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: showMoreBookingOptions ? 12 : 16 }]}>
@@ -7269,27 +7720,31 @@ export default function App() {
 
         {showMoreBookingOptions && (
           <>
-            <Text style={s.sectionTitle}>WHO IS THIS RIDE FOR?</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-              <TouchableOpacity
-                onPress={() => setBookingForSomeoneElse(false)}
-                style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: !bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: !bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
-                <Text style={{ color: !bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Myself</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setBookingForSomeoneElse(true)}
-                style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
-                <Text style={{ color: bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Someone Else</Text>
-              </TouchableOpacity>
-            </View>
-            {bookingForSomeoneElse && (
-              <View style={[s.card, { marginBottom: 12 }]}>
-                <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
-                  We'll pass their name and number to the driver, and text them the ride details if they're on Luma too.
-                </Text>
-                <TextInput style={s.input} placeholder="Their name (e.g. your son, a relative)" placeholderTextColor="#5A6B85" value={recipientName} onChangeText={setRecipientName} />
-                <TextInput style={[s.input, { marginBottom: 0 }]} placeholder="Their phone number" placeholderTextColor="#5A6B85" value={recipientPhone} onChangeText={setRecipientPhone} keyboardType="phone-pad" />
-              </View>
+            {selectedService !== "motorbike" && (
+              <>
+                <Text style={s.sectionTitle}>WHO IS THIS RIDE FOR?</Text>
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => setBookingForSomeoneElse(false)}
+                    style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: !bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: !bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
+                    <Text style={{ color: !bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Myself</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setBookingForSomeoneElse(true)}
+                    style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: bookingForSomeoneElse ? "#2DD4BF" : "#131C2E", borderWidth: 1, borderColor: bookingForSomeoneElse ? "#2DD4BF" : "#333", alignItems: "center" }}>
+                    <Text style={{ color: bookingForSomeoneElse ? "#000" : "#F4F6FB", fontWeight: "700" }}>Someone Else</Text>
+                  </TouchableOpacity>
+                </View>
+                {bookingForSomeoneElse && (
+                  <View style={[s.card, { marginBottom: 12 }]}>
+                    <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>
+                      We'll pass their name and number to the driver, and text them the ride details if they're on Luma too.
+                    </Text>
+                    <TextInput style={s.input} placeholder="Their name (e.g. your son, a relative)" placeholderTextColor="#5A6B85" value={recipientName} onChangeText={setRecipientName} />
+                    <TextInput style={[s.input, { marginBottom: 0 }]} placeholder="Their phone number" placeholderTextColor="#5A6B85" value={recipientPhone} onChangeText={setRecipientPhone} keyboardType="phone-pad" />
+                  </View>
+                )}
+              </>
             )}
 
             <Text style={s.sectionTitle}>HOW MANY RIDES?</Text>
@@ -8058,9 +8513,7 @@ export default function App() {
         <View style={s.nav}>
           <TouchableOpacity onPress={() => go("myBookings")}><Text style={s.navLink}>Back</Text></TouchableOpacity>
           <Text style={s.navLogo}>Track Your Driver</Text>
-          <TouchableOpacity onPress={() => openAIChat({ bookingId: activeBookingId || undefined })}>
-            <Ionicons name="sparkles" size={20} color="#2DD4BF" />
-          </TouchableOpacity>
+          <View />
         </View>
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           <View style={[s.card, { alignItems: "center" }]}>
@@ -8180,9 +8633,17 @@ export default function App() {
                         : chatMessages.map((m, i) => (
                           <View key={i} style={[s.chatBubble, { backgroundColor: m.sender_id === user?.id ? "#2DD4BF22" : "#131C2E", alignSelf: m.sender_id === user?.id ? "flex-end" : "flex-start" }]}>
                             <Text style={{ color: "#8A9BB8", fontSize: 11 }}>{m.sender_name}</Text>
-                            {m.image_url
-                              ? <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
-                              : <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>}
+                            {m.voice_url ? (
+                              <TouchableOpacity onPress={() => playVoiceNote(m.id || String(i), m.voice_url)} style={{ flexDirection: "row", alignItems: "center", marginTop: 4, paddingVertical: 4 }}>
+                                <Ionicons name={playingVoiceMsgId === (m.id || String(i)) ? "pause-circle" : "play-circle"} size={30} color="#2DD4BF" />
+                                <View style={{ marginLeft: 8, height: 3, width: 90, backgroundColor: "#2DD4BF44", borderRadius: 2 }} />
+                                <Text style={{ color: "#8A9BB8", fontSize: 11, marginLeft: 8 }}>{m.voice_duration_ms ? `${Math.round(m.voice_duration_ms / 1000)}s` : ""}</Text>
+                              </TouchableOpacity>
+                            ) : m.image_url ? (
+                              <Image source={{ uri: m.image_url }} style={{ width: 160, height: 160, borderRadius: 10, marginTop: 4 }} resizeMode="cover" />
+                            ) : (
+                              <Text style={{ color: "#F4F6FB" }}>{m.message}</Text>
+                            )}
                           </View>
                         ))
                       }
@@ -8194,11 +8655,23 @@ export default function App() {
                         onPress={() => activeBookingId && sendChatPhoto(activeBookingId)}>
                         {uploadingChatPhoto ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="camera" size={20} color="#2DD4BF" />}
                       </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isRecordingVoice ? "#F87171" : "#131C2E", borderWidth: 1, borderColor: isRecordingVoice ? "#F87171" : "#1B2A44", alignItems: "center", justifyContent: "center" }}
+                        disabled={uploadingVoiceNote}
+                        onPressIn={startVoiceRecording}
+                        onPressOut={() => activeBookingId && stopAndSendVoiceRecording(activeBookingId)}>
+                        {uploadingVoiceNote ? <Ionicons name="hourglass" size={18} color="#2DD4BF" /> : <Ionicons name="mic" size={20} color={isRecordingVoice ? "#fff" : "#2DD4BF"} />}
+                      </TouchableOpacity>
                       <TextInput style={[s.input, { flex: 1, marginBottom: 0 }]} placeholder="Type a message..." placeholderTextColor="#5A6B85" value={chatInput} onChangeText={setChatInput} />
                       <TouchableOpacity style={[s.btn, { marginTop: 0, paddingHorizontal: 16 }]} onPress={() => activeBookingId && sendMessage(activeBookingId)}>
                         <Text style={s.btnTxt}>Send</Text>
                       </TouchableOpacity>
                     </View>
+                    {isRecordingVoice && (
+                      <Text style={{ color: "#F87171", fontSize: 12, textAlign: "center", marginTop: -12, marginBottom: 12 }}>
+                        Recording... release the mic to send, or move away to cancel
+                      </Text>
+                    )}
                   </>
                 )}
               </>
@@ -8223,6 +8696,7 @@ export default function App() {
             </TouchableOpacity>
           )}
         </ScrollView>
+        <FloatingAIButton onPress={() => openAIChat({ bookingId: activeBookingId || undefined })} />
       </SafeAreaView>
     );
   }

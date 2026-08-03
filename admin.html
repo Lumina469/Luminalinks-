@@ -11,21 +11,21 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   :root {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --surface2: #1f2937;
-    --border: #30363d;
-    --gold: #c9a84c;
-    --gold-dim: #c9a84c33;
+    --bg: #0B1220;
+    --surface: #131C2E;
+    --surface2: #182339;
+    --border: #1B2A44;
+    --gold: #2DD4BF;
+    --gold-dim: #2DD4BF33;
     --green: #00ff88;
     --green-dim: #00ff8822;
     --red: #ff4444;
     --red-dim: #ff444422;
     --blue: #2196f3;
     --blue-dim: #2196f322;
-    --text: #e6edf3;
-    --text-dim: #8b949e;
-    --text-muted: #484f58;
+    --text: #F4F6FB;
+    --text-dim: #8A9BB8;
+    --text-muted: #5A6B85;
     --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
     --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   }
@@ -1382,8 +1382,8 @@ function buildChart() {
       datasets: [{
         label: 'Commission (GHS)',
         data: revenues,
-        backgroundColor: '#c9a84c44',
-        borderColor: '#c9a84c',
+        backgroundColor: '#2DD4BF44',
+        borderColor: '#2DD4BF',
         borderWidth: 2,
         borderRadius: 6,
       }]
@@ -1467,7 +1467,7 @@ function renderLiveOps() {
     if (!hasDriverPos && !hasPickupPos) return;
     const lat = hasDriverPos ? b.driver_lat : b.client_lat;
     const lng = hasDriverPos ? b.driver_lng : b.client_lng;
-    const color = hasDriverPos ? '#2DD4BF' : '#c9a84c';
+    const color = hasDriverPos ? '#2DD4BF' : '#F5A623';
     const icon = L.divIcon({
       html: `<div style="width:16px;height:16px;background:${color};border:3px solid #0d1117;border-radius:50%;box-shadow:0 0 6px ${color};"></div>`,
       iconSize: [16, 16], className: '',
