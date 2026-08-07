@@ -312,6 +312,17 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Kill switch — checked first, before anything else. Defaults to enabled
+    // if the setting has never been touched, so a fresh install never
+    // silently disables itself.
+    const { data: killSwitchRow } = await supabase.from("system_settings").select("value").eq("key", "ai_assistant_enabled").maybeSingle();
+    if (killSwitchRow && killSwitchRow.value === 0) {
+      return new Response(JSON.stringify({
+        reply: "Lumina is temporarily unavailable right now. Please tap 'Contact Support' below and our team will help you directly.",
+        fallback: true,
+      }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+    }
+
     let contextBlock = "No active ride or order context available.";
     if (bookingId) {
       const { data: booking } = await supabase.from("bookings").select("status, service, pickup, dropoff, price, payment_method, driver_id, created_at").eq("id", bookingId).maybeSingle();
@@ -399,6 +410,21 @@ ${contextBlock}`;
     }
 
     const reply = finalReply || "I'm not sure how to help with that — please contact human support and they'll take it from here.";
+
+    // Log this exchange for the admin console's AI Activity page — best
+    // effort only; a logging failure should never block the actual reply
+    // from reaching the user.
+    const lastToolUsed = contents
+      .slice()
+      .reverse()
+      .find((c: any) => c.parts?.[0]?.functionCall)?.parts?.[0]?.functionCall?.name || null;
+    supabase.from("ai_activity_log").insert({
+      user_id: userId,
+      user_name: userName || "User",
+      role: role || "client",
+      message: message.slice(0, 500),
+      tool_used: lastToolUsed,
+    }).then(() => {}, (e: any) => console.log("Activity log insert failed (non-blocking):", String(e)));
 
     return new Response(JSON.stringify({ reply, fallback: false }), {
       status: 200,

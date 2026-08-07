@@ -139,6 +139,15 @@ let PLATFORM_SETTINGS = {
   staff_discount: 50,
   birthday_mode_active: 0,
   maintenance_mode_active: 0,
+  // A ride running long due to real traffic/detours shouldn't cost the
+  // driver money — but a short grace period exists first so completely
+  // normal variance (a few minutes either way) never triggers a charge.
+  overtime_grace_minutes: 10,
+  overtime_rate_per_min: 1.5,
+  // Defaults to OFF — matches the deliberate current decision to remove
+  // cancellation friction for a new app. Admin can flip this back on anytime
+  // from Settings without needing a code change.
+  cancellation_fees_enabled: 0,
 };
 
 const loadPlatformSettings = async () => {
@@ -1735,6 +1744,17 @@ export default function App() {
     if (extraStops.some(s => s.pin)) recalcMultiStopFare();
   }, [stopsFareKey]);
 
+  const getRouteDurationMinutes = async (fromLat: number, fromLng: number, toLat: number, toLng: number): Promise<number | null> => {
+    try {
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=false`);
+      const data = await res.json();
+      const durationSeconds = data?.routes?.[0]?.duration;
+      return durationSeconds != null ? Math.max(1, Math.round(durationSeconds / 60)) : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
   const saveBookingToSupabase = async (pickup: string, dropoff: string, service: string, price: number, paymentMethodForBooking: string, originalPrice?: number, promoType?: string | null) => {
     const { data: { user: u } } = await supabase.auth.getUser();
     const clientId = u?.id || "00000000-0000-0000-0000-000000000001";
@@ -1742,6 +1762,9 @@ export default function App() {
       ? new Date(`${scheduledDay}T${scheduledTime}:00`).toISOString()
       : null;
     const stopsText = extraStops.filter(s => s.text).map(s => s.text).join(" → ");
+    const estimatedDurationMin = (pickupPin && dropoffPin)
+      ? await getRouteDurationMinutes(pickupPin.latitude, pickupPin.longitude, dropoffPin.latitude, dropoffPin.longitude)
+      : null;
     const { data } = await supabase.from("bookings").insert({
       client_id: clientId,
       client_name: authName || user?.name,
@@ -1755,6 +1778,7 @@ export default function App() {
       scheduled_for: scheduledFor,
       payment_method: paymentMethodForBooking,
       payment_status: paymentMethodForBooking === "cash" ? "n/a" : "awaiting_completion",
+      estimated_duration_min: estimatedDurationMin,
       // Actually saving these now — they were previously only ever READ
       // (for the driver-en-route ETA), never written, meaning the ETA check
       // always silently found nothing and never ran at all, regardless of
@@ -2415,7 +2439,28 @@ export default function App() {
 
   const completeRide = async () => {
     if (!activeBookingId) return;
-    const order = driverBookings.find(b => b.id === activeBookingId);
+    let order = driverBookings.find(b => b.id === activeBookingId);
+
+    // Overtime charge — only applies if we have both a real trip-start
+    // timestamp and an estimate to compare it against. Grace period exists
+    // specifically so ordinary variance never triggers a charge; this is
+    // about protecting a driver stuck in real, unusual traffic on one ride,
+    // not nickel-and-diming every trip that runs a few minutes long.
+    let overtimeCharge = 0;
+    let overtimeMinutes = 0;
+    if (order?.trip_started_at && order?.estimated_duration_min) {
+      const actualMinutes = (Date.now() - new Date(order.trip_started_at).getTime()) / 60000;
+      const allowedMinutes = order.estimated_duration_min + PLATFORM_SETTINGS.overtime_grace_minutes;
+      if (actualMinutes > allowedMinutes) {
+        overtimeMinutes = Math.round(actualMinutes - allowedMinutes);
+        overtimeCharge = parseFloat((overtimeMinutes * PLATFORM_SETTINGS.overtime_rate_per_min).toFixed(2));
+        // Mutate the local copy only — everything below (wallet credit,
+        // commission split, database write) reads from this same `order`,
+        // so one adjustment here is enough for the whole function to stay
+        // consistent, rather than touching every individual reference.
+        order = { ...order, price: parseFloat((order.price + overtimeCharge).toFixed(2)) };
+      }
+    }
 
     // Motorbike Delivery is a parcel/errand service, not passenger transport —
     // require photo proof before completing, same anti-scam reasoning as food delivery.
@@ -2431,10 +2476,18 @@ export default function App() {
 
     await supabase.from("bookings").update({
       status: "completed",
+      ...(overtimeCharge > 0 ? { price: order.price, overtime_charge: overtimeCharge } : {}),
       ...(deliveryPhotoUrl ? { delivery_photo: deliveryPhotoUrl } : {}),
     }).eq("id", activeBookingId);
     haptic("success");
     setRideDeliveryProofPhoto(null);
+
+    if (overtimeCharge > 0) {
+      showAlert(
+        "Ride Ran Long",
+        `This trip took ${overtimeMinutes} minutes longer than estimated, so an extra GHS ${overtimeCharge.toFixed(2)} was added to the fare to make sure you're paid fairly for the time.`
+      );
+    }
 
     let cashCommissionOwed = 0;
     let cashCreditedExtra = 0;
@@ -2665,6 +2718,12 @@ export default function App() {
     setWaitingSecondsElapsed(0);
     setTripStarted(true);
     haptic("success");
+    // Record the real start of the trip itself — not acceptance, not arrival
+    // at pickup — so an overtime charge (if the trip runs long) measures
+    // actual time-on-trip, not how far the driver happened to be from pickup.
+    if (activeBookingId) {
+      supabase.from("bookings").update({ trip_started_at: new Date().toISOString() }).eq("id", activeBookingId);
+    }
   };
 
   const stopWaitingTimer = () => {
@@ -2730,20 +2789,26 @@ export default function App() {
 
     if (byClient) {
       if (booking.status === "pending") {
-        // Cancel before acceptance — free
         charge = 0; reason = "Cancelled before driver accepted";
       } else if (booking.status === "accepted") {
         const acceptedTime = new Date(booking.accepted_at || now);
         const minutesSinceAccepted = (now.getTime() - acceptedTime.getTime()) / 60000;
 
-        if (minutesSinceAccepted <= 3) {
-          // Within 3 min grace — free
+        if (!PLATFORM_SETTINGS.cancellation_fees_enabled) {
+          // Cancellation fees are currently off platform-wide (admin toggle,
+          // Settings page) — still record why someone cancelled for
+          // visibility, just never actually charge for it.
+          charge = 0;
+          reason = minutesSinceAccepted <= 3
+            ? "Cancelled within 3 minute grace period"
+            : driverArrivedAt
+              ? "Cancelled after driver arrived (fee waived — cancellation fees currently disabled)"
+              : "Cancelled after 3 minute grace period (fee waived — cancellation fees currently disabled)";
+        } else if (minutesSinceAccepted <= 3) {
           charge = 0; reason = "Cancelled within 3 minute grace period";
         } else if (driverArrivedAt) {
-          // Driver already arrived — GHS 10
           charge = 10; reason = "Driver had already arrived";
         } else {
-          // After 3 mins, before arrival — GHS 5
           charge = 5; reason = "Cancelled after 3 minute grace period";
         }
       }

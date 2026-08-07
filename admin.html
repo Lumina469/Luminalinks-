@@ -505,6 +505,12 @@
       <span class="nav-icon">🏦</span><span>Platform Revenue</span>
     </button>
     <div class="nav-section">Platform</div>
+    <button class="nav-item" onclick="showPage('ai')">
+      <span class="nav-icon">✨</span><span>AI Activity</span>
+    </button>
+    <button class="nav-item" onclick="showPage('waitlist')">
+      <span class="nav-icon">📋</span><span>Waitlist</span>
+    </button>
     <button class="nav-item" onclick="showPage('promos')">
       <span class="nav-icon">🎁</span><span>Promo Codes</span>
     </button>
@@ -943,6 +949,31 @@
       </div>
       <button class="btn btn-gold" onclick="saveFareFloors()">Save Fare Floors</button>
     </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Ride Overtime Charge</div>
+      <div class="card-sub">If a ride runs longer than its estimated time (real traffic, detours), the driver is compensated for the extra minutes — protects drivers from being stuck on one cheap ride for an hour.</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Grace Period (minutes)</label>
+          <input class="form-input" id="overtime-grace-minutes" value="10" type="number" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Overtime Rate (GHS / minute)</label>
+          <input class="form-input" id="overtime-rate-per-min" value="1.5" type="number" min="0" step="0.1">
+        </div>
+      </div>
+      <button class="btn btn-gold" onclick="saveOvertimeSettings()">Save Overtime Settings</button>
+    </div>
+
+    <div class="card" style="margin-top:8px;">
+      <div class="card-title">Cancellation Fees</div>
+      <div class="card-sub">Currently disabled platform-wide — a deliberate choice while the app is new, prioritizing removing friction over protecting a few dollars of driver dispatch cost. Turn back on anytime.</div>
+      <div class="toggle-wrap">
+        <div class="toggle" id="cancellation-fee-toggle" onclick="toggleCancellationFees()"></div>
+        <span class="toggle-label" id="cancellation-fee-toggle-label">Loading...</span>
+      </div>
+    </div>
   </div>
 
   <!-- SOS ALERTS PAGE -->
@@ -1031,6 +1062,67 @@
     </div>
     <div id="kyc-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
       <div style="color:var(--text-muted);text-align:center;padding:40px;grid-column:1/-1;">Loading driver verifications...</div>
+    </div>
+  </div>
+
+  <!-- AI ACTIVITY PAGE -->
+  <div class="page" id="page-ai">
+    <div class="alert warn">
+      <span>⚠️</span>
+      <span>Lumina can take real actions — booking rides, sending parcels, placing food orders. This page lets you see what it's been asked and shut it off instantly if something ever goes wrong.</span>
+    </div>
+    <div class="card">
+      <div class="card-title">Lumina Kill Switch</div>
+      <div class="card-sub">Turning this off immediately stops Lumina from responding anywhere in the app — every user just gets a "temporarily unavailable" message instead. Nothing else in the app is affected.</div>
+      <div class="toggle-wrap">
+        <div class="toggle" id="ai-toggle" onclick="toggleAiEnabled()"></div>
+        <span class="toggle-label" id="ai-toggle-label">Loading...</span>
+      </div>
+    </div>
+    <div class="section-header" style="margin-top:24px;">
+      <div class="section-title">Recent Conversations</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadAiActivity()">↻ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>User</th><th>Role</th><th>Message</th><th>Tool Used</th><th>Time</th></tr></thead>
+        <tbody id="ai-activity-table">
+          <tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- WAITLIST PAGE -->
+  <div class="page" id="page-waitlist">
+    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat-card gold">
+        <div class="stat-label">Total Signups</div>
+        <div class="stat-val" id="waitlist-total">0</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">Want to Ride</div>
+        <div class="stat-val" id="waitlist-riders">0</div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-label">Want to Drive</div>
+        <div class="stat-val" id="waitlist-drivers">0</div>
+      </div>
+    </div>
+    <div class="section-header">
+      <div class="section-title">Signups</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="downloadWaitlistCsv()">⬇ Export CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadWaitlist()">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Email</th><th>Interested As</th><th>Source</th><th>Date</th></tr></thead>
+        <tbody id="waitlist-table">
+          <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
@@ -1194,7 +1286,8 @@ function showPage(name) {
     kyc: 'KYC — Driver Verification Review', promos: 'Promo Codes',
     notifications: 'Notifications', settings: 'Platform Settings',
     sos: 'SOS Emergency Alerts', restaurants: 'Restaurant Approval', foodorders: 'Food Orders',
-    lostfound: 'Lost & Found', platformrevenue: 'Platform Revenue'
+    lostfound: 'Lost & Found', platformrevenue: 'Platform Revenue',
+    ai: 'AI Activity', waitlist: 'Waitlist Signups'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
   if (name === 'operations') { loadBookings().then(renderLiveOps); }
@@ -1205,6 +1298,8 @@ function showPage(name) {
   if (name === 'foodorders') loadFoodOrders();
   if (name === 'lostfound') loadLostFound();
   if (name === 'refunds') loadRefunds();
+  if (name === 'ai') loadAiActivity();
+  if (name === 'waitlist') loadWaitlist();
 
   // Platform Revenue polls every 15s while open, and stops the moment you
   // navigate away — so the balance stays current without wasting calls
@@ -1727,6 +1822,18 @@ async function loadSystemSettings() {
     if (el) el.value = valueMap[key] != null ? valueMap[key] : FARE_FLOOR_DEFAULTS[key];
   });
 
+  // Overtime charge settings
+  document.getElementById('overtime-grace-minutes').value = valueMap.overtime_grace_minutes != null ? valueMap.overtime_grace_minutes : 10;
+  document.getElementById('overtime-rate-per-min').value = valueMap.overtime_rate_per_min != null ? valueMap.overtime_rate_per_min : 1.5;
+
+  // Cancellation fees — defaults to OFF (matches the app's own hardcoded
+  // default), so a fresh install shows the correct state without needing
+  // this key to already exist in the database.
+  cancellationFeesEnabled = valueMap.cancellation_fees_enabled === 1;
+  const cancelTog = document.getElementById('cancellation-fee-toggle');
+  cancelTog.classList.toggle('on', cancellationFeesEnabled);
+  document.getElementById('cancellation-fee-toggle-label').textContent = cancellationFeesEnabled ? 'Cancellation fees are ON' : 'Cancellation fees are OFF';
+
   // Night pricing multipliers
   Object.keys(NIGHT_DEFAULTS).forEach(key => {
     const el = document.getElementById(key.replace(/_/g, '-'));
@@ -1788,6 +1895,41 @@ async function saveFareFloors() {
   alert(result.success
     ? '✅ Fare floors updated. Takes effect on the next fare calculation in the app.'
     : `⚠️ Failed to update: ${result.error || 'one or more settings failed to save'}`);
+}
+
+async function saveOvertimeSettings() {
+  const grace = parseFloat(document.getElementById('overtime-grace-minutes').value);
+  const rate = parseFloat(document.getElementById('overtime-rate-per-min').value);
+  if (isNaN(grace) || grace < 0 || isNaN(rate) || rate < 0) {
+    alert('Please enter valid, non-negative numbers.');
+    return;
+  }
+  const result = await callUpdateSettings([
+    { key: 'overtime_grace_minutes', value: grace },
+    { key: 'overtime_rate_per_min', value: rate },
+  ]);
+  alert(result.success
+    ? '✅ Overtime settings updated. Takes effect on the next ride completed in the app.'
+    : `⚠️ Failed to update: ${result.error || 'one or more settings failed to save'}`);
+}
+
+let cancellationFeesEnabled = false;
+
+async function toggleCancellationFees() {
+  const newState = !cancellationFeesEnabled;
+  if (newState && !confirm('Turn cancellation fees back ON? Clients will be charged again for late/no-driver-shown-up cancellations, same tiered structure as before.')) return;
+  cancellationFeesEnabled = newState;
+  const tog = document.getElementById('cancellation-fee-toggle');
+  tog.classList.toggle('on', cancellationFeesEnabled);
+  document.getElementById('cancellation-fee-toggle-label').textContent = cancellationFeesEnabled ? 'Cancellation fees are ON' : 'Cancellation fees are OFF';
+
+  const result = await callUpdateSettings([{ key: 'cancellation_fees_enabled', value: cancellationFeesEnabled ? 1 : 0 }]);
+  if (!result.success) {
+    cancellationFeesEnabled = !cancellationFeesEnabled;
+    tog.classList.toggle('on', cancellationFeesEnabled);
+    document.getElementById('cancellation-fee-toggle-label').textContent = cancellationFeesEnabled ? 'Cancellation fees are ON' : 'Cancellation fees are OFF';
+    alert(`⚠️ Failed to save: ${result.error || 'unknown error'}`);
+  }
 }
 
 async function saveNightSettings() {
@@ -2547,6 +2689,93 @@ async function deletePromo(id, code) {
   if (!confirm(`Delete promo code "${code}"? This cannot be undone.`)) return;
   await sb(`promo_codes?id=eq.${id}`, { method: 'DELETE' });
   await loadPromoCodes();
+}
+
+// ── AI ACTIVITY ──
+let aiEnabled = true;
+
+async function loadAiActivity() {
+  const settingsData = await sb('system_settings?select=key,value&key=eq.ai_assistant_enabled');
+  const row = Array.isArray(settingsData) ? settingsData[0] : null;
+  // Defaults to ON if the setting has never been touched — matches how the
+  // mobile app itself treats a missing key (fail open, not silently disabled).
+  aiEnabled = row ? row.value !== 0 : true;
+  const tog = document.getElementById('ai-toggle');
+  tog.classList.toggle('on', aiEnabled);
+  document.getElementById('ai-toggle-label').textContent = aiEnabled ? 'Lumina is ON' : '🔴 Lumina is OFF — not responding to anyone';
+
+  const data = await sb('ai_activity_log?select=*&order=created_at.desc&limit=50');
+  const rows = Array.isArray(data) ? data : [];
+  const tbody = document.getElementById('ai-activity-table');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:24px;">No conversations logged yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.user_name || '—'}</td>
+      <td><span class="badge grey">${r.role || '—'}</span></td>
+      <td style="max-width:280px;font-size:12px;">${(r.message || '').substring(0, 80)}</td>
+      <td>${r.tool_used ? `<span class="badge blue">${r.tool_used}</span>` : '<span class="badge grey">none</span>'}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${new Date(r.created_at).toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+async function toggleAiEnabled() {
+  const newState = !aiEnabled;
+  if (!newState && !confirm('Turn Lumina OFF for everyone? Every user will get a "temporarily unavailable" message instead of a response, until you turn it back on.')) return;
+  aiEnabled = newState;
+  const tog = document.getElementById('ai-toggle');
+  tog.classList.toggle('on', aiEnabled);
+  document.getElementById('ai-toggle-label').textContent = aiEnabled ? 'Lumina is ON' : '🔴 Lumina is OFF — not responding to anyone';
+
+  const result = await callUpdateSettings([{ key: 'ai_assistant_enabled', value: aiEnabled ? 1 : 0 }]);
+  if (!result.success) {
+    aiEnabled = !aiEnabled;
+    tog.classList.toggle('on', aiEnabled);
+    document.getElementById('ai-toggle-label').textContent = aiEnabled ? 'Lumina is ON' : '🔴 Lumina is OFF — not responding to anyone';
+    alert(`⚠️ Failed to save: ${result.error || 'unknown error'}`);
+  }
+}
+
+// ── WAITLIST ──
+let allWaitlistSignups = [];
+
+async function loadWaitlist() {
+  const data = await sb('waitlist_signups?select=*&order=created_at.desc');
+  allWaitlistSignups = Array.isArray(data) ? data : [];
+
+  document.getElementById('waitlist-total').textContent = allWaitlistSignups.length;
+  document.getElementById('waitlist-riders').textContent = allWaitlistSignups.filter(w => w.interested_as === 'rider').length;
+  document.getElementById('waitlist-drivers').textContent = allWaitlistSignups.filter(w => w.interested_as === 'driver').length;
+
+  const tbody = document.getElementById('waitlist-table');
+  if (!allWaitlistSignups.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No signups yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = allWaitlistSignups.map(w => `
+    <tr>
+      <td>${w.email}</td>
+      <td><span class="badge ${w.interested_as === 'driver' ? 'blue' : 'green'}">${w.interested_as || 'rider'}</span></td>
+      <td style="color:var(--text-dim);font-size:12px;">${w.source || '—'}</td>
+      <td style="color:var(--text-muted);font-size:12px;">${new Date(w.created_at).toLocaleDateString()}</td>
+    </tr>
+  `).join('');
+}
+
+function downloadWaitlistCsv() {
+  if (!allWaitlistSignups.length) { alert('No signups to export yet.'); return; }
+  const rows = [['Email', 'Interested As', 'Source', 'Date'], ...allWaitlistSignups.map(w => [w.email, w.interested_as || 'rider', w.source || '', w.created_at])];
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `luma-waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 </script>
