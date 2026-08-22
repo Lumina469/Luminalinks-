@@ -4,7 +4,6 @@ const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Paystack's bank codes for Ghana Mobile Money networks
 const MOMO_BANK_CODES: { [key: string]: string } = {
   mtn: "MTN",
   vodafone: "VOD",
@@ -32,7 +31,6 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Confirm the wallet actually has this much available before doing anything
     const { data: wallet } = await supabase.from("wallets").select("*").eq("user_id", userId).maybeSingle();
     if (!wallet || wallet.balance < amount) {
       return new Response(JSON.stringify({ success: false, message: "Insufficient wallet balance" }), {
@@ -49,7 +47,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Create a withdrawal record up front, marked pending
     const { data: withdrawalRow } = await supabase.from("withdrawals").insert({
       user_id: userId,
       amount,
@@ -58,8 +55,6 @@ Deno.serve(async (req) => {
       status: "pending",
     }).select().single();
 
-    // Reuse an existing Paystack transfer recipient if we already created one for
-    // this user, otherwise create a fresh one now.
     const { data: profile } = await supabase.from("profiles").select("paystack_recipient_code, full_name").eq("id", userId).maybeSingle();
     let recipientCode = profile?.paystack_recipient_code;
 
@@ -90,7 +85,11 @@ Deno.serve(async (req) => {
       await supabase.from("profiles").update({ paystack_recipient_code: recipientCode, momo_provider: momoProvider }).eq("id", userId);
     }
 
-    // Initiate the real transfer
+    // Use the withdrawal row's own id as the transfer reference — lets the
+    // webhook look this exact row up later without any ambiguity, even
+    // before we have a transfer_code back from Paystack.
+    const transferReference = `withdrawal-${withdrawalRow.id}`;
+
     const transferRes = await fetch("https://api.paystack.co/transfer", {
       method: "POST",
       headers: {
@@ -99,13 +98,19 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         source: "balance",
-        amount: Math.round(amount * 100), // pesewas
+        amount: Math.round(amount * 100),
         recipient: recipientCode,
         reason: "LuminaLinks driver withdrawal",
+        reference: transferReference,
       }),
     });
     const transferData = await transferRes.json();
 
+    // transferData.status here is ONLY whether Paystack accepted the API
+    // call — NOT whether the transfer itself succeeded. Per Paystack's own
+    // docs, the real outcome (data.status: pending / otp / success) arrives
+    // later via webhook. This function must never treat API acceptance as
+    // confirmation that money actually moved.
     if (!transferData.status) {
       await supabase.from("withdrawals").update({ status: "failed", failure_reason: transferData.message }).eq("id", withdrawalRow.id);
       return new Response(JSON.stringify({ success: false, message: transferData.message || "Transfer could not be initiated" }), {
@@ -114,19 +119,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Success — deduct from wallet and mark the withdrawal complete
-    await supabase.from("wallets").update({
-      balance: parseFloat((wallet.balance - amount).toFixed(2)),
-      total_withdrawn: parseFloat((wallet.total_withdrawn + amount).toFixed(2)),
-      last_updated: new Date().toISOString(),
-    }).eq("user_id", userId);
+    const requiresOtp = transferData.data?.status === "otp";
 
+    // Record the transfer_code so the webhook can match this row later, but
+    // deliberately do NOT touch the wallet or mark this "success" yet — that
+    // only happens once Paystack's webhook confirms the transfer actually
+    // completed.
     await supabase.from("withdrawals").update({
-      status: "success",
-      paystack_transfer_code: transferData.data.transfer_code,
+      status: requiresOtp ? "otp_required" : "processing",
+      paystack_transfer_code: transferData.data?.transfer_code || null,
+      paystack_reference: transferReference,
     }).eq("id", withdrawalRow.id);
 
-    return new Response(JSON.stringify({ success: true, amount }), {
+    return new Response(JSON.stringify({
+      success: true,
+      pending: true,
+      amount,
+      message: requiresOtp
+        ? "Your withdrawal needs manual approval in the Paystack dashboard before it can complete — this shouldn't normally happen once OTP is disabled for transfers."
+        : "Your withdrawal has been submitted and is processing. You'll be notified once it's complete.",
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

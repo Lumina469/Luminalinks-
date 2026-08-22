@@ -148,6 +148,11 @@ let PLATFORM_SETTINGS = {
   // cancellation friction for a new app. Admin can flip this back on anytime
   // from Settings without needing a code change.
   cancellation_fees_enabled: 0,
+  // How far from a driver's current location a pending ride/delivery can be
+  // and still show up in their list at all. Requests beyond this are hidden
+  // entirely, not just sorted lower — a driver 40km away isn't a realistic
+  // match regardless of ranking.
+  driver_dispatch_radius_km: 20,
 };
 
 const loadPlatformSettings = async () => {
@@ -556,6 +561,10 @@ export default function App() {
   // useEffect was reaching for a variable that, at that point in the file,
   // hadn't been declared yet.
   const [myRestaurant, setMyRestaurant] = useState<any>(null);
+  // Same "used before declared" issue as myRestaurant above — this was
+  // declared 2,700+ lines later while a useEffect near the top already
+  // referenced it in a dependency array, which executes during every render.
+  const [activeFoodOrderId, setActiveFoodOrderId] = useState<string | null>(null);
   const [bookingForSomeoneElse, setBookingForSomeoneElse] = useState(false);
   const [recipientName, setRecipientName] = useState("");
   const [recipientPhone, setRecipientPhone] = useState("");
@@ -606,6 +615,7 @@ export default function App() {
 
   // Driver
   const [online, setOnline] = useState(false);
+  const [driverIdleLocation, setDriverIdleLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [incomingRideAlert, setIncomingRideAlert] = useState<any>(null);
   const [seenRideAlertIds, setSeenRideAlertIds] = useState<string[]>([]);
   const [queuedRides, setQueuedRides] = useState<any[]>([]);
@@ -768,6 +778,24 @@ export default function App() {
   // ============================================================
   // DATA FETCHING
   // ============================================================
+  // A single GPS fix every 60s while online — deliberately NOT continuous
+  // watching like an active ride uses, since an idle driver waiting for
+  // requests doesn't need that battery cost. This is only precise enough to
+  // sort/filter ride requests by rough proximity, not for live tracking.
+  useEffect(() => {
+    if (!online) { setDriverIdleLocation(null); return; }
+    let cancelled = false;
+    const refresh = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted" || cancelled) return;
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      if (loc && !cancelled) setDriverIdleLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+    };
+    refresh();
+    const interval = setInterval(refresh, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [online]);
+
   useEffect(() => {
     if (screen === "clientOrders" || screen === "bookRide") {
       if (screen === "clientOrders" && !online) return; // offline drivers don't poll for rides
@@ -908,10 +936,35 @@ export default function App() {
 
     const [{ data: ownBookings }, { data: pendingRequests }] = await Promise.all([ownBookingsPromise, pendingRequestsPromise]);
 
+    // Distance-filter and sort the pending requests specifically — a
+    // driver's own past bookings stay untouched (ride history shouldn't be
+    // pruned by current location), only the "should I accept this" list is
+    // affected.
+    let sortedPending = pendingRequests || [];
+    if (driverIdleLocation && sortedPending.length > 0) {
+      sortedPending = sortedPending
+        .map((b: any) => ({
+          ...b,
+          _distanceKm: (b.client_lat && b.client_lng)
+            ? getDist(driverIdleLocation.latitude, driverIdleLocation.longitude, b.client_lat, b.client_lng)
+            : null,
+        }))
+        // A request with no stored pickup coordinates at all is kept
+        // (better to show it than silently hide a real request over missing
+        // data), everything else is filtered to the configured radius.
+        .filter((b: any) => b._distanceKm == null || b._distanceKm <= PLATFORM_SETTINGS.driver_dispatch_radius_km)
+        .sort((a: any, b: any) => {
+          if (a._distanceKm == null && b._distanceKm == null) return 0;
+          if (a._distanceKm == null) return 1;
+          if (b._distanceKm == null) return -1;
+          return a._distanceKm - b._distanceKm;
+        });
+    }
+
     // Merge and de-duplicate by id (a booking could theoretically appear in
     // both sets in a race, e.g. this driver's own request that's somehow
     // also unassigned — shouldn't normally happen, but de-duping is cheap insurance).
-    const merged = [...(ownBookings || []), ...(pendingRequests || [])];
+    const merged = [...(ownBookings || []), ...sortedPending];
     const deduped = Array.from(new Map(merged.map(b => [b.id, b])).values());
     setDriverBookings(deduped);
   };
@@ -1820,10 +1873,22 @@ export default function App() {
   // Opens the AI Support Assistant scoped to a specific ride or order — this
   // is what lets it answer with real, specific context ("your driver is
   // Kwame, GHS 22 fare") instead of generic canned FAQ answers.
-  const openAIChat = (context: { bookingId?: string; orderId?: string }) => {
+  const openAIChat = async (context: { bookingId?: string; orderId?: string }) => {
     setAiChatContext(context);
-    setAiChatMessages([{ role: "assistant", content: "Hi! I'm Lumina, Luma's AI assistant. Ask me anything about your ride or order — where your driver is, payment questions, anything." }]);
     setShowAIChat(true);
+    const { data: { user: u } } = await supabase.auth.getUser();
+    const greeting = { role: "assistant" as const, content: "Hi! I'm Lumina, Luma's AI assistant. Ask me anything about your ride or order — where your driver is, payment questions, anything." };
+    if (!u) { setAiChatMessages([greeting]); return; }
+    // Load the real, saved conversation instead of always starting blank —
+    // previously this was pure in-memory state, so closing and reopening
+    // the chat silently lost every past message.
+    const { data: pastMessages } = await supabase
+      .from("ai_chat_messages")
+      .select("role, content")
+      .eq("user_id", u.id)
+      .order("created_at", { ascending: true })
+      .limit(30);
+    setAiChatMessages(pastMessages && pastMessages.length > 0 ? pastMessages : [greeting]);
   };
 
   const sendAISupportMessage = async () => {
@@ -1846,13 +1911,29 @@ export default function App() {
           message: messageText,
           bookingId: aiChatContext?.bookingId,
           orderId: aiChatContext?.orderId,
+          // The user's real, current GPS position — lets Lumina use exact
+          // coordinates directly when someone wants pickup "from here"
+          // instead of trying to geocode a vague text description of their
+          // own location, which was failing before.
+          userLat: location?.latitude,
+          userLng: location?.longitude,
           // Send recent turns as context, excluding the initial greeting —
           // keeps the AI aware of what's already been asked in this session.
           history: newHistory.slice(1, -1).map(m => ({ role: m.role, content: m.content })),
         }),
       });
       const data = await res.json();
-      setAiChatMessages(prev => [...prev, { role: "assistant", content: data.reply || "Sorry, I couldn't process that — please contact support." }]);
+      const replyText = data.reply || "Sorry, I couldn't process that — please contact support.";
+      setAiChatMessages(prev => [...prev, { role: "assistant", content: replyText }]);
+
+      // Save both sides of this exchange — best effort, a save failure
+      // shouldn't block the reply the user already sees on screen.
+      if (u) {
+        supabase.from("ai_chat_messages").insert([
+          { user_id: u.id, role: "user", content: messageText },
+          { user_id: u.id, role: "assistant", content: replyText },
+        ]).then(() => {}, () => {});
+      }
     } catch (e) {
       setAiChatMessages(prev => [...prev, { role: "assistant", content: "I'm having trouble connecting right now. Please contact human support and they'll help you directly." }]);
     }
@@ -2377,12 +2458,30 @@ export default function App() {
       .order("created_at", { ascending: false })
       .limit(5);
 
+    let candidates = data || [];
+    if (driverIdleLocation && candidates.length > 0) {
+      candidates = candidates
+        .map((b: any) => ({
+          ...b,
+          _distanceKm: (b.client_lat && b.client_lng)
+            ? getDist(driverIdleLocation.latitude, driverIdleLocation.longitude, b.client_lat, b.client_lng)
+            : null,
+        }))
+        .filter((b: any) => b._distanceKm == null || b._distanceKm <= PLATFORM_SETTINGS.driver_dispatch_radius_km)
+        .sort((a: any, b: any) => {
+          if (a._distanceKm == null && b._distanceKm == null) return 0;
+          if (a._distanceKm == null) return 1;
+          if (b._distanceKm == null) return -1;
+          return a._distanceKm - b._distanceKm;
+        });
+    }
+
     // Read from refs, not the closured state directly — this function is called
     // from a setInterval set up once when the driver goes online, so its closure
     // would otherwise keep seeing the seenRideAlertIds/incomingRideAlert values
     // from THAT moment forever, meaning a dismissed ride would never actually
     // stay dismissed and would keep popping back up on every 6-second poll.
-    const fresh = (data || []).find((b: any) => !seenRideAlertIdsRef.current.includes(b.id));
+    const fresh = candidates.find((b: any) => !seenRideAlertIdsRef.current.includes(b.id));
     if (fresh && !incomingRideAlertRef.current) {
       setIncomingRideAlert(fresh);
     }
@@ -2903,7 +3002,7 @@ export default function App() {
       setShowWithdrawModal(false);
 
       if (data.success) {
-        showAlert("Withdrawal Sent!", `GHS ${data.amount} is on its way to your Mobile Money.`);
+        showAlert("Withdrawal Submitted", data.message || `GHS ${data.amount} is being processed. Your wallet balance will update once it's confirmed.`);
         fetchWallet();
       } else {
         showAlert("Withdrawal Failed", data.message || "Something went wrong. Your balance has not been affected.");
@@ -3709,10 +3808,28 @@ export default function App() {
   const fetchAvailableFoodDeliveries = async () => {
     const { data } = await supabase
       .from("food_orders")
-      .select("*")
+      .select("*, restaurants(lat, lng)")
       .eq("status", "ready_for_pickup")
       .order("created_at", { ascending: true });
-    if (data) setAvailableFoodDeliveries(data);
+
+    let orders = data || [];
+    if (driverIdleLocation && orders.length > 0) {
+      orders = orders
+        .map((o: any) => ({
+          ...o,
+          _distanceKm: (o.restaurants?.lat && o.restaurants?.lng)
+            ? getDist(driverIdleLocation.latitude, driverIdleLocation.longitude, o.restaurants.lat, o.restaurants.lng)
+            : null,
+        }))
+        .filter((o: any) => o._distanceKm == null || o._distanceKm <= PLATFORM_SETTINGS.driver_dispatch_radius_km)
+        .sort((a: any, b: any) => {
+          if (a._distanceKm == null && b._distanceKm == null) return 0;
+          if (a._distanceKm == null) return 1;
+          if (b._distanceKm == null) return -1;
+          return a._distanceKm - b._distanceKm;
+        });
+    }
+    setAvailableFoodDeliveries(orders);
   };
 
   const watchRiderLocation = async (orderId: string) => {
@@ -4018,7 +4135,6 @@ export default function App() {
   const [customizingItem, setCustomizingItem] = useState<any>(null);
   const [chosenOptionNames, setChosenOptionNames] = useState<string[]>([]);
   const [foodOrders, setFoodOrders] = useState<any[]>([]);
-  const [activeFoodOrderId, setActiveFoodOrderId] = useState<string | null>(null);
   const [activeDeliveryStage, setActiveDeliveryStage] = useState<"pickup" | "delivery">("pickup");
   const [showFoodPaystack, setShowFoodPaystack] = useState(false);
   const [foodPaymentOrderId, setFoodPaymentOrderId] = useState<string | null>(null);
@@ -6443,6 +6559,7 @@ export default function App() {
               )}
               <Text style={{ color: "#8A9BB8", marginTop: 4 }}><Ionicons name="location" size={13} color="#8A9BB8" /> From: {b.pickup}</Text>
               <Text style={{ color: "#8A9BB8" }}><Ionicons name="flag" size={13} color="#8A9BB8" /> To: {b.dropoff}</Text>
+              {b._distanceKm != null && <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 2 }}>{b._distanceKm.toFixed(1)} km to pickup</Text>}
               <Text style={{ color: "#2DD4BF", fontWeight: "bold", marginTop: 6 }}>GHS {b.price}</Text>
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                 <View style={[s.badge, { backgroundColor: b.status === "pending" ? "#2a2000" : b.status === "scheduled" ? "#0a1a2a" : b.status === "accepted" ? "#1a3a1a" : "#1a1a2a" }]}>
@@ -7448,6 +7565,7 @@ export default function App() {
             <View key={order.id} style={s.card}>
               <Text style={s.cardTitle}>{order.restaurant_name}</Text>
               <Text style={s.cardSub}>Deliver to: {order.delivery_address}</Text>
+              {order._distanceKm != null && <Text style={{ color: "#8A9BB8", fontSize: 12, marginTop: 2 }}>{order._distanceKm.toFixed(1)} km to restaurant</Text>}
               <Text style={{ color: "#2DD4BF", fontWeight: "bold", marginTop: 6 }}>GHS {order.delivery_fee} delivery fee</Text>
               <TouchableOpacity style={[s.btn, { marginTop: 10 }]} onPress={() => acceptFoodDelivery(order.id)}>
                 <Text style={s.btnTxt}>Accept Delivery</Text>
@@ -7497,14 +7615,27 @@ export default function App() {
             <>
               <Text style={s.sectionTitle}>NAVIGATE TO CLIENT</Text>
               <View style={{ position: "relative" }}>
+                {(() => {
+                  // Computed here, in the real React scope, rather than trying
+                  // to reference myLat/myLng inside the ${} interpolation below
+                  // — those only exist as plain variables inside the embedded
+                  // HTML string's own script, not in this component's scope,
+                  // so referencing them directly there was a real crash bug
+                  // whenever a delivery had no stored destination coordinates.
+                  const myLat = riderLiveLocation?.latitude || location?.latitude || 6.6;
+                  const myLng = riderLiveLocation?.longitude || location?.longitude || -0.9;
+                  const destLat = activeDelivery?.delivery_lat || myLat;
+                  const destLng = activeDelivery?.delivery_lng || myLng;
+                  return (
+                <>
                 <WebView
                   style={{ width: "100%", height: 300, borderRadius: 12, marginBottom: 16 }}
                   source={{
                     html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{height:100%;margin:0}</style></head><body><div id="map"></div><script>
-                      var myLat=${riderLiveLocation?.latitude || location?.latitude || 6.6};
-                      var myLng=${riderLiveLocation?.longitude || location?.longitude || -0.9};
-                      var destLat=${activeDelivery?.delivery_lat || myLat};
-                      var destLng=${activeDelivery?.delivery_lng || myLng};
+                      var myLat=${myLat};
+                      var myLng=${myLng};
+                      var destLat=${destLat};
+                      var destLng=${destLng};
                       var map=L.map("map",{attributionControl:false,zoomControl:true,dragging:true,touchZoom:true,scrollWheelZoom:true,doubleClickZoom:true}).fitBounds([[myLat,myLng],[destLat,destLng]],{padding:[30,30]});
                       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
                       fetch("https://router.project-osrm.org/route/v1/driving/" + myLng + "," + myLat + ";" + destLng + "," + destLat + "?overview=full&geometries=geojson")
@@ -7539,6 +7670,9 @@ export default function App() {
                   style={{ position: "absolute", top: 10, right: 10, backgroundColor: "#0B1220E6", borderRadius: 20, width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
                   <Ionicons name="expand" size={18} color="#2DD4BF" />
                 </TouchableOpacity>
+                  </>
+                  );
+                })()}
               </View>
               <Text style={s.sectionTitle}>DELIVERY PROOF</Text>
               <Text style={{ color: "#8A9BB8", fontSize: 12, marginBottom: 10 }}>Take a photo showing the order was delivered — protects you if there's ever a dispute.</Text>

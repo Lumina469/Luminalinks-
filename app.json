@@ -2,6 +2,7 @@
   "expo": {
     "name": "Luma",
     "scheme": "luma",
+    "version": "1.0.0",
     "icon": "./assets/images/luma-app-icon-1024.png",
     "android": {
       "adaptiveIcon": {
@@ -9,7 +10,12 @@
         "backgroundColor": "#2DD4BF"
       },
       "package": "com.lumia614.luma",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 1
+    },
+    "ios": {
+      "bundleIdentifier": "com.lumia614.luma",
+      "buildNumber": "1.0.0"
     },
     "extra": {
       "eas": {
@@ -17,7 +23,20 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        { "locationWhenInUsePermission": "Luma uses your location to match you with nearby drivers and track your ride." }
+      ],
+      [
+        "expo-image-picker",
+        { "photosPermission": "Luma needs photo access to upload verification documents and delivery proof." }
+      ],
+      [
+        "expo-av",
+        { "microphonePermission": "Luma needs microphone access to send voice notes in ride chat." }
+      ],
+      "expo-notifications"
     ]
   }
 }

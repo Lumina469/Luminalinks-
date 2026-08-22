@@ -2,8 +2,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}`;
+const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")!;
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// openai/gpt-oss-120b — llama-3.3-70b-versatile (my original pick) was
+// deprecated by Groq on June 17, 2026, after my own knowledge cutoff, which
+// is exactly why the first deployment failed with "model not found." This
+// is Groq's own official recommended replacement, and GPT-OSS models are
+// specifically built with strong native tool-calling support, which matters
+// more here than raw chat quality.
+const GROQ_MODEL = "openai/gpt-oss-120b";
 
 // Same haversine distance formula used throughout the real app — kept
 // identical so a chat-quoted fare and the in-app fare never disagree.
@@ -39,6 +46,10 @@ function calcDeliveryFee(km: number) {
 // specifically because a hanging geocode request was very likely why booking
 // (which needs TWO of these) was timing out entirely, even though simple
 // Q&A messages (which need none) worked fine.
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number; display_name: string } | null> {
   try {
     const controller = new AbortController();
@@ -60,100 +71,145 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
 
 const TOOLS = [
   {
-    function_declarations: [
-      {
-        name: "get_recent_rides",
-        description: "Get the user's most recent ride bookings, including date, route, fare, and status.",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        name: "get_wallet_balance",
-        description: "Get the driver's current wallet balance. Only relevant for drivers.",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        name: "get_favorite_drivers",
-        description: "Get the client's list of favorite/saved drivers.",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        name: "cancel_current_ride",
-        description: "Cancel the user's current active ride, but ONLY if it's still 'pending' (no driver accepted yet).",
-        parameters: { type: "object", properties: {} },
-      },
-      {
-        name: "book_ride",
-        description: "Book a real car or tuk tuk ride for the user (not motorbike — that's parcel delivery only, use send_parcel instead). Always tell the user the quoted fare and confirm before calling this.",
-        parameters: {
-          type: "object",
-          properties: {
-            pickup: { type: "string", description: "Pickup address, as specific as possible" },
-            dropoff: { type: "string", description: "Destination address, as specific as possible" },
-            service: { type: "string", enum: ["car", "tuktuk"] },
-            payment_method: { type: "string", enum: ["cash", "momo", "card"] },
-          },
-          required: ["pickup", "dropoff", "service", "payment_method"],
+    type: "function",
+    function: {
+      name: "get_recent_rides",
+      description: "Get the user's most recent ride bookings, including date, route, fare, and status.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_wallet_balance",
+      description: "Get the driver's current wallet balance. Only relevant for drivers.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_favorite_drivers",
+      description: "Get the client's list of favorite/saved drivers.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_current_ride",
+      description: "Cancel the user's current active ride, but ONLY if it's still 'pending' (no driver accepted yet).",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "estimate_fare",
+      description: "Get the REAL calculated fare for a car/tuk tuk ride or motorbike parcel delivery, using live geocoding and the app's actual fare formula. ALWAYS call this before quoting any price to the user — never guess or estimate a fare yourself, since it will not match what booking actually charges.",
+      parameters: {
+        type: "object",
+        properties: {
+          pickup: { type: "string", description: "Pickup address" },
+          pickup_lat: { type: "number", description: "User's current latitude, if quoting from their current location" },
+          pickup_lng: { type: "number", description: "User's current longitude, if quoting from their current location" },
+          dropoff: { type: "string", description: "Destination or delivery address" },
+          service: { type: "string", enum: ["car", "tuktuk", "motorbike"] },
         },
+        required: ["pickup", "dropoff", "service"],
       },
-      {
-        name: "send_parcel",
-        description: "Book a motorbike delivery to send a parcel/package from one address to another. This is delivery only, never for carrying a passenger.",
-        parameters: {
-          type: "object",
-          properties: {
-            pickup: { type: "string", description: "Where the rider should pick up the parcel" },
-            dropoff: { type: "string", description: "Where the parcel should be delivered" },
-            recipient_name: { type: "string", description: "Name of the person receiving the parcel" },
-            recipient_phone: { type: "string", description: "Phone number of the person receiving the parcel" },
-            payment_method: { type: "string", enum: ["cash", "momo", "card"] },
-          },
-          required: ["pickup", "dropoff", "payment_method"],
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "book_ride",
+      description: "Book a real car or tuk tuk ride for the user (not motorbike — that's parcel delivery only, use send_parcel instead). Always call estimate_fare first and confirm the real fare with the user before calling this.",
+      parameters: {
+        type: "object",
+        properties: {
+          pickup: { type: "string", description: "Pickup address, as specific as possible. If booking from the user's current location, use a short label like 'Current Location' instead of trying to describe it." },
+          pickup_lat: { type: "number", description: "The user's current latitude — only include this when they want pickup at their current location, using the exact coordinates given in context." },
+          pickup_lng: { type: "number", description: "The user's current longitude — only include this when they want pickup at their current location, using the exact coordinates given in context." },
+          dropoff: { type: "string", description: "Destination address, as specific as possible" },
+          service: { type: "string", enum: ["car", "tuktuk"] },
+          payment_method: { type: "string", enum: ["cash", "momo", "card"] },
         },
+        required: ["pickup", "dropoff", "service", "payment_method"],
       },
-      {
-        name: "search_restaurants",
-        description: "Search for open, approved restaurants by name. Use this first when the user wants to order food, before looking at any menu.",
-        parameters: {
-          type: "object",
-          properties: { query: { type: "string", description: "Restaurant name or partial name to search for" } },
-          required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_parcel",
+      description: "Book a motorbike delivery to send a parcel/package from one address to another. This is delivery only, never for carrying a passenger.",
+      parameters: {
+        type: "object",
+        properties: {
+          pickup: { type: "string", description: "Where the rider should pick up the parcel. If from the user's current location, use a short label like 'Current Location' instead of trying to describe it." },
+          pickup_lat: { type: "number", description: "The user's current latitude — only include when picking up from their current location." },
+          pickup_lng: { type: "number", description: "The user's current longitude — only include when picking up from their current location." },
+          dropoff: { type: "string", description: "Where the parcel should be delivered" },
+          recipient_name: { type: "string", description: "Name of the person receiving the parcel" },
+          recipient_phone: { type: "string", description: "Phone number of the person receiving the parcel" },
+          payment_method: { type: "string", enum: ["cash", "momo", "card"] },
         },
+        required: ["pickup", "dropoff", "payment_method"],
       },
-      {
-        name: "get_restaurant_menu",
-        description: "Get the menu items (name, price, availability) for a specific restaurant. Call search_restaurants first to get the restaurant_id.",
-        parameters: {
-          type: "object",
-          properties: { restaurant_id: { type: "string" } },
-          required: ["restaurant_id"],
-        },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_restaurants",
+      description: "Search for open, approved restaurants by name. Use this first when the user wants to order food, before looking at any menu.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "Restaurant name or partial name to search for" } },
+        required: ["query"],
       },
-      {
-        name: "place_food_order",
-        description: "Place a real food order. Always confirm the exact items, quantities, delivery address, and total price with the user before calling this.",
-        parameters: {
-          type: "object",
-          properties: {
-            restaurant_id: { type: "string" },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_restaurant_menu",
+      description: "Get the menu items (name, price, availability) for a specific restaurant. Call search_restaurants first to get the restaurant_id.",
+      parameters: {
+        type: "object",
+        properties: { restaurant_id: { type: "string" } },
+        required: ["restaurant_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_food_order",
+      description: "Place a real food order. Always confirm the exact items, quantities, delivery address, and total price with the user before calling this.",
+      parameters: {
+        type: "object",
+        properties: {
+          restaurant_id: { type: "string" },
+          items: {
+            type: "array",
             items: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  menu_item_id: { type: "string" },
-                  name: { type: "string" },
-                  price: { type: "number" },
-                  quantity: { type: "number" },
-                },
+              type: "object",
+              properties: {
+                menu_item_id: { type: "string" },
+                name: { type: "string" },
+                price: { type: "number" },
+                quantity: { type: "number" },
               },
             },
-            delivery_address: { type: "string" },
-            payment_method: { type: "string", enum: ["momo", "card"] },
           },
-          required: ["restaurant_id", "items", "delivery_address", "payment_method"],
+          delivery_address: { type: "string" },
+          payment_method: { type: "string", enum: ["momo", "card"] },
         },
+        required: ["restaurant_id", "items", "delivery_address", "payment_method"],
       },
-    ],
+    },
   },
 ];
 
@@ -184,13 +240,63 @@ async function executeTool(name: string, args: any, userId: string, userName: st
     return { success: true };
   }
 
+  if (name === "estimate_fare") {
+    const { pickup, pickup_lat, pickup_lng, dropoff, service } = args;
+    const pickupGeo = (pickup_lat && pickup_lng)
+      ? { lat: pickup_lat, lng: pickup_lng, display_name: pickup || "Current Location" }
+      : await geocodeAddress(pickup);
+    await sleep(1100);
+    const dropoffGeo = await geocodeAddress(dropoff);
+    if (!pickupGeo || !dropoffGeo) {
+      return { success: false, reason: "Couldn't find one of those addresses to calculate a real fare. Please ask the user to be more specific." };
+    }
+    const { data: settingsRows } = await supabase.from("system_settings").select("key, value").in("key", ["car_min_fare", "tuktuk_min_fare", "motorbike_min_fare"]);
+    const settingsMap: any = { car: 20, tuktuk: 10, motorbike: 15 };
+    (settingsRows || []).forEach((r: any) => {
+      if (r.key === "car_min_fare") settingsMap.car = r.value;
+      if (r.key === "tuktuk_min_fare") settingsMap.tuktuk = r.value;
+      if (r.key === "motorbike_min_fare") settingsMap.motorbike = r.value;
+    });
+    const km = getDist(pickupGeo.lat, pickupGeo.lng, dropoffGeo.lat, dropoffGeo.lng);
+    const fare = calcFare(km, service, settingsMap);
+    return { success: true, fare, distance_km: parseFloat(km.toFixed(1)), pickup: pickupGeo.display_name, dropoff: dropoffGeo.display_name, note: "This is the real fare from the app's actual formula — quote this exact number, don't round or adjust it." };
+  }
+
   if (name === "book_ride") {
-    const { pickup, dropoff, service, payment_method } = args;
-    const [pickupGeo, dropoffGeo, settingsRows] = await Promise.all([
-      geocodeAddress(pickup),
-      geocodeAddress(dropoff),
-      supabase.from("system_settings").select("key, value").in("key", ["car_min_fare", "tuktuk_min_fare", "motorbike_min_fare"]).then((r: any) => r.data),
-    ]);
+    const { pickup, pickup_lat, pickup_lng, dropoff, service, payment_method } = args;
+    // Guard against accidental double-booking — a real user impatiently
+    // confirming twice (unclear loading state, slow connection) shouldn't
+    // end up with two real rides. Same pickup/dropoff/service from the same
+    // user in the last 2 minutes is treated as a duplicate, not a new ride.
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: recentDuplicate } = await supabase
+      .from("bookings")
+      .select("id, status")
+      .eq("client_id", userId)
+      .eq("service", service)
+      .ilike("pickup", `%${pickup}%`)
+      .gte("created_at", twoMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recentDuplicate) {
+      return { success: false, reason: "This looks like the same ride you just booked a moment ago — didn't create a second one. Check the rides screen to confirm it's there.", already_booked: true, booking_id: recentDuplicate.id };
+    }
+
+    // Nominatim's usage policy caps requests at 1/second, summed across ALL
+    // of the app's users combined — running pickup and dropoff geocoding in
+    // parallel (as an earlier version of this did, to save time) violates
+    // that, and Nominatim silently rejects/blocks requests that break it.
+    // That's very likely the real cause behind "can't find the address I
+    // gave it" — this wasn't a fluke, it was two simultaneous requests
+    // hitting a service that explicitly forbids that.
+    const settingsPromise = supabase.from("system_settings").select("key, value").in("key", ["car_min_fare", "tuktuk_min_fare", "motorbike_min_fare"]).then((r: any) => r.data);
+    const pickupGeo = (pickup_lat && pickup_lng)
+      ? { lat: pickup_lat, lng: pickup_lng, display_name: pickup || "Current Location" }
+      : await geocodeAddress(pickup);
+    await sleep(1100);
+    const dropoffGeo = await geocodeAddress(dropoff);
+    const settingsRows = await settingsPromise;
     if (!pickupGeo || !dropoffGeo) {
       return { success: false, reason: "Couldn't find one of those addresses. Please ask the user to be more specific, or suggest they use the map picker in the app instead." };
     }
@@ -221,8 +327,27 @@ async function executeTool(name: string, args: any, userId: string, userName: st
   }
 
   if (name === "send_parcel") {
-    const { pickup, dropoff, recipient_name, recipient_phone, payment_method } = args;
-    const [pickupGeo, dropoffGeo] = await Promise.all([geocodeAddress(pickup), geocodeAddress(dropoff)]);
+    const { pickup, pickup_lat, pickup_lng, dropoff, recipient_name, recipient_phone, payment_method } = args;
+    const twoMinutesAgoParcel = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: recentParcelDuplicate } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("client_id", userId)
+      .eq("service", "motorbike")
+      .ilike("pickup", `%${pickup}%`)
+      .gte("created_at", twoMinutesAgoParcel)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recentParcelDuplicate) {
+      return { success: false, reason: "This looks like the same parcel delivery you just booked a moment ago — didn't create a second one.", already_booked: true, booking_id: recentParcelDuplicate.id };
+    }
+
+    const pickupGeo = (pickup_lat && pickup_lng)
+      ? { lat: pickup_lat, lng: pickup_lng, display_name: pickup || "Current Location" }
+      : await geocodeAddress(pickup);
+    await sleep(1100);
+    const dropoffGeo = await geocodeAddress(dropoff);
     if (!pickupGeo || !dropoffGeo) {
       return { success: false, reason: "Couldn't find one of those addresses. Please ask the user to be more specific." };
     }
@@ -260,6 +385,20 @@ async function executeTool(name: string, args: any, userId: string, userName: st
 
   if (name === "place_food_order") {
     const { restaurant_id, items, delivery_address, payment_method } = args;
+    const twoMinutesAgoFood = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: recentOrderDuplicate } = await supabase
+      .from("food_orders")
+      .select("id")
+      .eq("client_id", userId)
+      .eq("restaurant_id", restaurant_id)
+      .gte("created_at", twoMinutesAgoFood)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recentOrderDuplicate) {
+      return { success: false, reason: "This looks like the same order you just placed a moment ago from this restaurant — didn't create a second one.", already_booked: true, order_id: recentOrderDuplicate.id };
+    }
+
     const { data: restaurant } = await supabase.from("restaurants").select("business_name, lat, lng").eq("id", restaurant_id).maybeSingle();
     if (!restaurant) return { success: false, reason: "Restaurant not found." };
     const deliveryGeo = await geocodeAddress(delivery_address);
@@ -301,7 +440,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { userId, userName, role, message, bookingId, orderId, history } = await req.json();
+    const { userId, userName, role, message, bookingId, orderId, history, userLat, userLng } = await req.json();
 
     if (!message) {
       return new Response(JSON.stringify({ error: "Missing message" }), {
@@ -325,14 +464,21 @@ Deno.serve(async (req) => {
 
     let contextBlock = "No active ride or order context available.";
     if (bookingId) {
-      const { data: booking } = await supabase.from("bookings").select("status, service, pickup, dropoff, price, payment_method, driver_id, created_at").eq("id", bookingId).maybeSingle();
+      const { data: booking } = await supabase.from("bookings").select("status, service, pickup, dropoff, price, payment_method, driver_id, driver_lat, driver_lng, client_lat, client_lng, created_at").eq("id", bookingId).maybeSingle();
       if (booking) {
         let driverName = "Not yet assigned";
         if (booking.driver_id) {
           const { data: driver } = await supabase.from("profiles").select("full_name").eq("id", booking.driver_id).maybeSingle();
           driverName = driver?.full_name || "Assigned driver";
         }
-        contextBlock = `Current ride:\n- Status: ${booking.status}\n- Service: ${booking.service}\n- Pickup: ${booking.pickup}\n- Dropoff: ${booking.dropoff}\n- Fare: GHS ${booking.price}\n- Payment method: ${booking.payment_method}\n- Driver: ${driverName}\n- Booked: ${booking.created_at}`;
+        let locationLine = "Live location not available yet.";
+        if (booking.driver_lat && booking.driver_lng && booking.client_lat && booking.client_lng) {
+          const km = getDist(booking.driver_lat, booking.driver_lng, booking.client_lat, booking.client_lng);
+          locationLine = km < 0.15
+            ? "Driver is essentially at the pickup point right now."
+            : `Driver is approximately ${km.toFixed(1)} km from the pickup point right now.`;
+        }
+        contextBlock = `Current ride:\n- Status: ${booking.status}\n- Service: ${booking.service}\n- Pickup: ${booking.pickup}\n- Dropoff: ${booking.dropoff}\n- Fare: GHS ${booking.price}\n- Payment method: ${booking.payment_method}\n- Driver: ${driverName}\n- Driver's current location: ${locationLine}\n- Booked: ${booking.created_at}`;
       }
     } else if (orderId) {
       const { data: order } = await supabase.from("food_orders").select("status, restaurant_name, total, payment, delivery_address, rider_id, created_at").eq("id", orderId).maybeSingle();
@@ -346,13 +492,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    const currentLocationLine = (userLat && userLng)
+      ? `The user's current live location is known (${userLat}, ${userLng}). If they ask to book from "here," "my location," or "where I am," pass pickup_lat and pickup_lng directly to book_ride or send_parcel using these exact numbers — do NOT try to geocode a text description of their current position, since that will fail or return an unrelated place.`
+      : "The user's current live location is not available right now — if they want pickup at their current position, ask them to type a specific address instead.";
+
     const systemPrompt = `You are Lumina, Luma's in-app AI assistant — Luma is a Ghana-based ride-hailing, delivery, and food services app. You are talking to a ${role === "client" ? "client (customer)" : "driver/rider (service provider)"}.
 
 You have REAL tools that take REAL actions — booking a ride, sending a parcel, and ordering food actually create live bookings/orders, not simulations. Because of this:
-- ALWAYS confirm the key details (addresses, fare, items, total) with the user in plain conversation BEFORE calling book_ride, send_parcel, or place_food_order. Never book or order silently on the first mention — ask "should I go ahead and book this?" or similar first, and only call the tool once they say yes.
+- NEVER state a fare or price from your own estimate or general knowledge. ALWAYS call estimate_fare first to get the real, calculated number, and quote exactly that — a guessed number will not match what the user is actually charged, which breaks trust badly.
+- ALWAYS confirm the key details (addresses, the REAL fare from estimate_fare, items, total) with the user in plain conversation BEFORE calling book_ride, send_parcel, or place_food_order. Never book or order silently on the first mention — ask "should I go ahead and book this?" or similar first, and only call the tool once they say yes.
 - For food orders, always search_restaurants first, then get_restaurant_menu, then confirm the exact items/quantities/total with the user before place_food_order.
 - Motorbike is delivery-only — never book it as a passenger ride, only via send_parcel.
 - If book_ride or send_parcel fails because an address couldn't be found, ask the user for a more specific address rather than guessing.
+- ${currentLocationLine}
 
 Be concise, warm, and Ghana-context aware — plain everyday language, not corporate. If asked your name, you're Lumina.
 
@@ -361,51 +513,82 @@ If something is outside what your tools can do (a dispute, a policy question you
 Context for this conversation:
 ${contextBlock}`;
 
-    const geminiHistory = (Array.isArray(history) ? history : []).map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+    // OpenAI-format messages array — system prompt is just the first message
+    // with role "system", unlike Gemini's separate system_instruction field.
+    const openaiHistory = (Array.isArray(history) ? history : []).map((m: any) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content,
     }));
 
-    let contents = [...geminiHistory, { role: "user", parts: [{ text: message }] }];
+    let messages: any[] = [
+      { role: "system", content: systemPrompt },
+      ...openaiHistory,
+      { role: "user", content: message },
+    ];
     let finalReply: string | null = null;
 
     // Loop up to 5 tool-calling rounds — ordering food genuinely needs several
     // steps (search restaurant → check menu → place order), so a single
     // request/response round-trip isn't enough for that flow.
     for (let round = 0; round < 5; round++) {
-      const geminiRes = await fetch(GEMINI_URL, {
+      const groqRes = await fetch(GROQ_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
+          model: GROQ_MODEL,
+          messages,
           tools: TOOLS,
-          contents,
-          generationConfig: { thinkingConfig: { thinkingLevel: "low" } },
+          tool_choice: "auto",
+          // gpt-oss-120b is a reasoning model that generates internal
+          // "thinking" tokens before every response — on the free tier's
+          // tight per-minute token budget, a multi-step flow (search →
+          // menu → order) can burn through the limit fast since the whole
+          // growing conversation gets resent each round. "low" keeps tool-
+          // calling reliable without the deep-reasoning token cost this
+          // task doesn't actually need.
+          reasoning_effort: "low",
         }),
       });
-      const geminiData = await geminiRes.json();
+      const groqData = await groqRes.json();
 
-      if (!geminiRes.ok) {
-        console.log(`Gemini API error (round ${round}):`, JSON.stringify(geminiData));
+      if (!groqRes.ok) {
+        console.log(`Groq API error (round ${round}):`, JSON.stringify(groqData));
         return new Response(JSON.stringify({
           reply: "I'm having trouble reaching my AI assistant right now. Please tap 'Contact Support' below and our team will help you directly.",
           fallback: true,
         }), { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
       }
 
-      const parts = geminiData?.candidates?.[0]?.content?.parts || [];
-      const functionCall = parts.find((p: any) => p.functionCall)?.functionCall;
-      const textPart = parts.find((p: any) => p.text)?.text;
+      const responseMessage = groqData?.choices?.[0]?.message;
+      // OpenAI-format tool_calls is a real array — Groq can request several
+      // tools in one turn (e.g. searching two things at once), unlike
+      // Gemini's single functionCall per response part.
+      const toolCalls = responseMessage?.tool_calls;
 
-      if (functionCall) {
-        console.log("Lumina calling tool:", functionCall.name, JSON.stringify(functionCall.args));
-        const toolResult = await executeTool(functionCall.name, functionCall.args || {}, userId, userName || "Client", bookingId, supabase);
-        contents.push({ role: "model", parts: [{ functionCall }] });
-        contents.push({ role: "user", parts: [{ functionResponse: { name: functionCall.name, response: toolResult } }] });
-        continue; // loop again so Gemini can react to the tool result
+      if (toolCalls && toolCalls.length > 0) {
+        // The assistant's own turn (including its tool_calls) must be pushed
+        // back exactly as received before the tool results, same requirement
+        // as any OpenAI-compatible tool-calling flow.
+        messages.push(responseMessage);
+
+        for (const toolCall of toolCalls) {
+          const fnName = toolCall.function?.name;
+          const fnArgs = JSON.parse(toolCall.function?.arguments || "{}");
+          console.log("Lumina calling tool:", fnName, JSON.stringify(fnArgs));
+          const toolResult = await executeTool(fnName, fnArgs, userId, userName || "Client", bookingId, supabase);
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(toolResult),
+          });
+        }
+        continue; // loop again so the model can react to the tool result(s)
       }
 
-      finalReply = textPart || null;
+      finalReply = responseMessage?.content || null;
       break;
     }
 
@@ -414,10 +597,11 @@ ${contextBlock}`;
     // Log this exchange for the admin console's AI Activity page — best
     // effort only; a logging failure should never block the actual reply
     // from reaching the user.
-    const lastToolUsed = contents
+    const lastToolUsed = messages
       .slice()
       .reverse()
-      .find((c: any) => c.parts?.[0]?.functionCall)?.parts?.[0]?.functionCall?.name || null;
+      .find((m: any) => m.role === "assistant" && m.tool_calls?.length > 0)
+      ?.tool_calls?.[0]?.function?.name || null;
     supabase.from("ai_activity_log").insert({
       user_id: userId,
       user_name: userName || "User",
